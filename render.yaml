@@ -1,0 +1,15 @@
+# Render.com 蓝本：一个 Web Service 同时提供前端与 /api 数据代理
+# 使用：新建 Web Service 选用 Dockerfile，或 New Blueprint 选择本仓库。
+# 部署后务必在 Render 环境变量中设置 ACCESS_TOKEN（访问口令），否则任何人可访问。
+services:
+  - type: web
+    name: fund-monitor
+    runtime: docker
+    plan: free
+    dockerContext: .
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: ACCESS_TOKEN
+        sync: false

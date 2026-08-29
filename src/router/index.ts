@@ -1,0 +1,49 @@
+import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+
+const routes: RouteRecordRaw[] = [
+  {
+    path: '/',
+    component: () => import('@/layout/MainLayout.vue'),
+    redirect: '/dashboard',
+    children: [
+      {
+        path: 'dashboard',
+        name: 'dashboard',
+        component: () => import('@/views/dashboard/index.vue'),
+        meta: { title: '总览' },
+      },
+      {
+        path: 'instruments',
+        name: 'instruments',
+        component: () => import('@/views/instruments/index.vue'),
+        meta: { title: '标的库' },
+      },
+      {
+        path: 'instruments/:code',
+        name: 'instrument-detail',
+        component: () => import('@/views/instruments/detail.vue'),
+        meta: { title: '标的信息' },
+      },
+      {
+        path: 'monitor',
+        name: 'monitor',
+        component: () => import('@/views/monitor/index.vue'),
+        meta: { title: '监控规则' },
+      },
+    ],
+  },
+  { path: '/funds', redirect: '/instruments' },
+  { path: '/funds/:code', redirect: (to) => `/instruments/${to.params.code}` },
+]
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes,
+})
+
+router.afterEach((to) => {
+  const title = to.meta.title as string | undefined
+  document.title = title ? `${title} · 投资监控` : '投资监控'
+})
+
+export default router

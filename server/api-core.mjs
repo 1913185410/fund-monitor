@@ -20,9 +20,10 @@ const json = (status, data) =>
     headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
   })
 
-/** SHA-256 → hex（Web Crypto，异步） */
+/** SHA-256 → hex（Web Crypto，异步；Node 运行时无全局 crypto 时回退 node:crypto） */
 async function sha256Hex(text) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(text)))
+  const c = globalThis.crypto ?? (await import('node:crypto')).webcrypto
+  const buf = await c.subtle.digest('SHA-256', new TextEncoder().encode(String(text)))
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 

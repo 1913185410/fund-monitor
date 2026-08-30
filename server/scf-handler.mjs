@@ -11,10 +11,18 @@
  */
 import { readFileSync, existsSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { join, normalize, extname } from 'node:path'
+import { join, normalize, extname, dirname } from 'node:path'
 import { handleApiRequest } from './api-core.mjs'
 
-const DIST_ROOT = fileURLToPath(new URL('../dist', import.meta.url))
+/** 云函数包 / 本地两种布局都兼容：入口在包根或 server/ 下时，都能找到 dist */
+function findDist() {
+  const here = dirname(fileURLToPath(import.meta.url))
+  for (const p of [join(here, 'dist'), join(here, '..', 'dist')]) {
+    if (existsSync(p)) return p
+  }
+  return join(here, 'dist')
+}
+const DIST_ROOT = findDist()
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -79,7 +87,7 @@ function serveStatic(pathname) {
     return {
       statusCode: 200,
       headers: { 'Content-Type': MIME[extname(file).toLowerCase()] || 'application/octet-stream' },
-      body: readFileSync(file),
+      body: readFileSync(file).toString('base64'),
       isBase64Encoded: true,
     }
   }
@@ -88,7 +96,7 @@ function serveStatic(pathname) {
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
-      body: readFileSync(idx),
+      body: readFileSync(idx).toString('base64'),
       isBase64Encoded: true,
     }
   }

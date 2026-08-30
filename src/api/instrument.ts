@@ -1,4 +1,5 @@
-import { getJSON } from './http'
+import { getJSON, getRaw } from './http'
+import { parseQuote, parseSearch } from './parse'
 import type { SearchResult, Quote, KLineBundle, FlowBundle, InstrumentKind } from '@/types/instrument'
 
 const qs = (params: Record<string, string | number | undefined>) =>
@@ -8,13 +9,16 @@ const qs = (params: Record<string, string | number | undefined>) =>
     .join('&')
 
 export const instrumentApi = {
-  /** 统一搜索（股票/ETF/基金/指数） */
-  search(keyword: string, limit = 10) {
-    return getJSON<SearchResult[]>(`/search-all?${qs({ keyword, limit })}`)
+  /** 统一搜索（股票/ETF/基金/指数）：云端回传原始字节，浏览器侧 GBK 解码后解析 */
+  async search(keyword: string, limit = 10): Promise<SearchResult[]> {
+    const env = await getRaw(`/search-all?${qs({ keyword, limit })}`)
+    return parseSearch(env, limit)
   },
-  /** 批量实时行情（股票/ETF/指数） */
-  quote(symbols: string[]) {
-    return getJSON<Quote[]>(`/quote?symbols=${encodeURIComponent(symbols.join(','))}`)
+  /** 批量实时行情（股票/ETF/指数）：同上 */
+  async quote(symbols: string[]): Promise<Quote[]> {
+    if (!symbols.length) return []
+    const env = await getRaw(`/quote?symbols=${encodeURIComponent(symbols.join(','))}`)
+    return parseQuote(env)
   },
   /** K线 + 指标（日/周/月） */
   kline(params: { symbol?: string; kind: InstrumentKind; code?: string; klt: 'day' | 'week' | 'month'; count?: number }) {

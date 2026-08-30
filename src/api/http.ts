@@ -22,3 +22,27 @@ export async function getJSON<T>(path: string, timeout = 20000): Promise<T> {
     window.clearTimeout(timer)
   }
 }
+
+/** 发送 GET 请求，返回原始字节信封（{ enc, raw }），用于云端不解码、浏览器侧解码的场景 */
+export async function getRaw(
+  path: string,
+  timeout = 20000,
+): Promise<{ enc: string; raw: string } | null> {
+  const base = import.meta.env.VITE_API_BASE_URL ?? ''
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), timeout)
+  try {
+    const res = await fetch(`${base}/api${path}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      throw new Error(`请求失败：${res.status} ${path}`)
+    }
+    const data = await res.json()
+    return data ?? null
+  } finally {
+    window.clearTimeout(timer)
+  }
+}

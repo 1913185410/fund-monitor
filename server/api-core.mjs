@@ -92,22 +92,24 @@ export async function handleApiRequest(request, env = {}) {
   /* 其余 /api 需要登录 */
   if (!(await isAuthed(request, env))) return json(401, { message: 'unauthorized' })
 
-  /* 统一搜索 */
+  /* 统一搜索：回传原始字节信封（{ enc, raw }），GBK 解码在浏览器侧 */
   if (path === '/api/search-all') {
     const keyword = (url.searchParams.get('keyword') || '').trim()
-    if (!keyword) return json(200, [])
+    if (!keyword) return json(200, null)
     const limit = Math.min(20, Number(url.searchParams.get('limit')) || 8)
-    return json(200, await cached(`search:${keyword}`, 60_000, () => searchAll(keyword, limit)))
+    const env = await cached(`search:${keyword}`, 60_000, () => searchAll(keyword, limit))
+    return json(200, env)
   }
 
-  /* 批量实时行情 */
+  /* 批量实时行情：同样回传原始字节信封（GBK） */
   if (path === '/api/quote') {
     const symbols = (url.searchParams.get('symbols') || '')
       .split(',')
       .map((s) => s.trim().toLowerCase())
       .filter((s) => /^(sh|sz|bj)\d{6}$/.test(s))
-    if (!symbols.length) return json(200, [])
-    return json(200, await cached(`quote:${symbols.join(',')}`, 15_000, async () => quoteBatch(symbols)))
+    if (!symbols.length) return json(200, null)
+    const env = await cached(`quote:${symbols.join(',')}`, 15_000, async () => quoteBatch(symbols))
+    return json(200, env)
   }
 
   /* K线 + 指标 */

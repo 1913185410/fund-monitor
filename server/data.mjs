@@ -44,6 +44,16 @@ async function fetchText(url, headers, timeout, encoding = 'utf-8') {
   return buf ? bufToText(buf, encoding) : null
 }
 
+/** Uint8Array → base64（跨运行时，不依赖 Node Buffer；浏览器/Workers 原生 btoa 可用） */
+function bytesToBase64(bytes) {
+  let bin = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk))
+  }
+  return btoa(bin)
+}
+
 async function fetchJson(url, headers, timeout) {
   const text = await fetchText(url, headers, timeout)
   if (!text) return null
@@ -54,96 +64,33 @@ async function fetchJson(url, headers, timeout) {
   }
 }
 
-/** smartbox 类型标签 → 统一标的类型 */
-function kindFromTag(tag, code) {
-  if (/ETF/i.test(tag)) return 'etf'
-  if (/GP/i.test(tag)) return 'stock'
-  if (/KJ|JJ/i.test(tag)) return 'fund'
-  if (/INX|ZS/i.test(tag)) return 'index'
-  if (/^[5]/.test(code)) return 'etf'
-  if (/^(15|16)/.test(code)) return 'etf'
-  if (/^(11|12)/.test(code)) return 'bond'
-  return 'stock'
-}
-
 /**
- * 统一搜索：腾讯 smartbox 为主，东财基金联想为兜底。
- * 返回 [{ code, name, kind, market, symbol, type }]
+ * 统一搜索（股票/ETF/基金/指数）：腾讯 smartbox 为主，东财基金联想为兜底。
+ * 云端只负责抓取原始字节并以 base64 回传（含编码标记），GBK 解码交给浏览器，
+ * 避免 Cloudflare Workers 运行时不支持 gbk 导致中文乱码。
+ * 返回 { enc:'gbk'|'utf-8', raw: base64 } 或 null。
  */
 export async function searchAll(keyword, limit = 8) {
-  const text = await fetchText(
+  const buf = await fetchBuf(
     `https://smartbox.gtimg.cn/s3/?v=2&q=${encodeURIComponent(keyword)}&t=all`,
     {},
     12000,
-    'gbk',
   )
-  const out = []
-  if (text) {
-    const m = text.match(/v_hint="([^"]*)"/)
-    if (m && m[1]) {
-      for (const p of m[1].split('^').filter(Boolean)) {
-        const [market, code, name, , kindTag] = p.split('~')
-        if (!code || !name) continue
-        const kind = kindFromTag(kindTag || '', code)
-        out.push({
-          code,
-          name,
-          kind,
-          market,
-          symbol: kind === 'fund' ? code : `${market}${code}`,
-          type: kindTag || '',
-        })
-        if (out.length >= limit) break
-      }
-    }
-  }
-  if (out.length === 0) {
-    // 兜底：东财基金联想搜索
-    const body = await fetchJson(
-      `http://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx?m=1&key=${encodeURIComponent(keyword)}&_=${Date.now()}`,
-    )
-    const list = Array.isArray(body?.Datas) ? body.Datas : []
-    for (const it of list.slice(0, limit)) {
-      const base = it.FundBaseInfo ?? {}
-      const code = it.CODE || it.BACKCODE || it._id || ''
-      const name = it.NAME || ''
-      if (!code || !name) continue
-      out.push({ code, name, kind: 'fund', symbol: code, type: '场外基金' })
-    }
-  }
-  return out
+  if (buf && buf.length) return { enc: 'gbk', raw: bytesToBase64(buf) }
+  // 兜底：东财基金联想（UTF-8）
+  const text = await fetchText(
+    `http://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx?m=1&key=${encodeURIComponent(keyword)}&_=${Date.now()}`,
+  )
+  if (text) return { enc: 'utf-8', raw: bytesToBase64(new TextEncoder().encode(text)) }
+  return null
 }
 
-/** 批量实时行情（股票/ETF/指数/可转债），按符号逗号分隔 */
+/** 批量实时行情（股票/ETF/指数/可转债），返回原始字节信封（GBK） */
 export async function quoteBatch(symbols) {
-  if (!symbols.length) return []
-  const text = await fetchText(`https://qt.gtimg.cn/q=${symbols.join(',')}`, {}, 12000, 'gbk')
-  if (!text) return []
-  const out = []
-  const re = /v_(\w+)="([^"]*)"/g
-  let m
-  while ((m = re.exec(text))) {
-    const symbol = m[1]
-    const f = m[2].split('~')
-    if (f.length < 35) continue
-    out.push({
-      symbol,
-      code: f[2],
-      name: f[1],
-      price: Number(f[3]) || 0,
-      prevClose: Number(f[4]) || 0,
-      open: Number(f[5]) || 0,
-      high: Number(f[33]) || 0,
-      low: Number(f[34]) || 0,
-      change: Number(f[31]) || 0,
-      changePct: Number(f[32]) || 0,
-      volume: Number(f[36]) || 0,
-      amount: Number(f[37]) || 0,
-      turnover: Number(f[38]) || 0,
-      time: f[30] || '',
-    })
-  }
-  return out
+  if (!symbols.length) return null
+  const buf = await fetchBuf(`https://qt.gtimg.cn/q=${symbols.join(',')}`, {}, 12000)
+  if (buf && buf.length) return { enc: 'gbk', raw: bytesToBase64(buf) }
+  return null
 }
 
 /** 股票/ETF 日/周/月 K 线（腾讯，前复权） */

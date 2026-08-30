@@ -145,22 +145,56 @@ export async function quoteBatch(symbols) {
 }
 
 /** 股票/ETF 日/周/月 K 线（腾讯，前复权） */
+/** 腾讯K线多域名轮换，避免单域名被限流 */
+const KLINE_HOSTS = ['https://web.ifzq.gtimg.cn', 'https://proxy.finance.qq.com', 'https://ifzq.gtimg.cn']
+
 export async function klineStock(symbol, klt = 'day', count = 120) {
-  const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${symbol},${klt},,,${count},qfq`
-  const json = await fetchJson(url)
-  const d = json?.data?.[symbol]
-  if (!d) return null
-  const list = d[`qfq${klt}`] || d[klt] || []
-  return list
-    .map((r) => ({
-      date: r[0],
-      open: Number(r[1]),
-      close: Number(r[2]),
-      high: Number(r[3]),
-      low: Number(r[4]),
-      volume: Number(r[5]) || 0,
-    }))
-    .filter((p) => p.date && p.close > 0)
+  for (const host of KLINE_HOSTS) {
+    const json = await fetchJson(`${host}/appstock/app/fqkline/get?param=${symbol},${klt},,,${count},qfq`)
+    const d = json?.data?.[symbol]
+    const list = d?.[`qfq${klt}`] || d?.[klt]
+    if (Array.isArray(list) && list.length) {
+      const points = list
+        .map((r) => ({
+          date: r[0],
+          open: Number(r[1]),
+          close: Number(r[2]),
+          high: Number(r[3]),
+          low: Number(r[4]),
+          volume: Number(r[5]) || 0,
+        }))
+        .filter((p) => p.date && p.close > 0)
+      if (points.length) return points
+    }
+  }
+  // 最后兜底：新浪日K（不复权），周/月由日线聚合
+  return klineSinaFallback(symbol, klt, count)
+}
+
+/** 新浪日K兜底（scale=240 日线；datalen 上限约 800） */
+async function klineSinaFallback(symbol, klt, count) {
+  const url = `https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20_=/CN_MarketDataService.getKLineData?symbol=${symbol}&scale=240&ma=no&datalen=${Math.min(800, Math.max(count * 8, 120))}`
+  const text = await fetchUtf8(url, { Referer: 'https://finance.sina.com.cn' })
+  if (!text) return null
+  const m = text.match(/=\s*(\[[\s\S]*\])/)
+  if (!m) return null
+  try {
+    const list = JSON.parse(m[1])
+    const points = list
+      .filter((r) => r.day && Number(r.close) > 0)
+      .map((r) => ({
+        date: r.day,
+        open: Number(r.open),
+        close: Number(r.close),
+        high: Number(r.high),
+        low: Number(r.low),
+        volume: Number(r.volume) || 0,
+      }))
+    if (!points.length) return null
+    return klt === 'day' ? points.slice(-count) : aggregate(points, klt).slice(-count)
+  } catch {
+    return null
+  }
 }
 
 /** 东财 FTYPE → 前端类型枚举 */
@@ -227,7 +261,7 @@ export async function fundBasicInfo(code) {
   return null
 }
 
-/** 基金净值日序列（东财 lsjz，每页最多 20 条，并行分页） */
+/** 基金净值日序列（东财 lsjz，每页最多 20 条，并行分页；失败时降级用官网净值走势） */
 async function fundNavDaily(code, count = 120) {
   const pageSize = 20
   const pages = Math.max(1, Math.min(30, Math.ceil(count / pageSize)))
@@ -256,7 +290,29 @@ async function fundNavDaily(code, count = 120) {
       })
     }
   }
-  return all.sort((a, b) => (a.date < b.date ? -1 : 1))
+  if (all.length) return all.sort((a, b) => (a.date < b.date ? -1 : 1))
+  return fundNavFromPingzhong(code)
+}
+
+/** 降级：从官网 pingzhongdata 取每日净值序列（约一年） */
+async function fundNavFromPingzhong(code) {
+  const text = await fetchUtf8(`https://fund.eastmoney.com/pingzhongdata/${code}.js`)
+  if (!text) return []
+  const m = text.match(/Data_netWorthTrend = (\[[\s\S]*?\]);/)
+  if (!m) return []
+  try {
+    const list = JSON.parse(m[1])
+    return list
+      .filter((r) => r && typeof r.y === 'number' && r.y > 0)
+      .map((r) => {
+        const date = new Date(r.x + 8 * 3600 * 1000).toISOString().slice(0, 10)
+        const close = r.y
+        return { date, open: close, close, high: close, low: close, volume: 0 }
+      })
+      .sort((a, b) => (a.date < b.date ? -1 : 1))
+  } catch {
+    return []
+  }
 }
 
 /** 周/月 K 由日线聚合 */

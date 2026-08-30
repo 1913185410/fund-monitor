@@ -1,9 +1,23 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { usePortfolioStore } from '@/stores/portfolio'
+import { useRulesStore } from '@/stores/rules'
 import { kindLabel } from '@/types/instrument'
+import { SIGNAL_LABEL } from '@/types/rule'
 
 const fundStore = usePortfolioStore()
+const rulesStore = useRulesStore()
+
+function fmtTime(t: number) {
+  const d = new Date(t)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+function signalColor(s: string) {
+  return s === 'buy' ? 'red' : s === 'sell' ? 'green' : 'arcoblue'
+}
+function signalLabel(s: string) {
+  return SIGNAL_LABEL[(s as 'buy' | 'sell' | 'hold')] ?? s
+}
 
 const cards = computed(() => [
   { label: '总持仓', value: fundStore.totalHoldingAmount, unit: '元', format: 'currency' },
@@ -50,7 +64,7 @@ function formatValue(format: string, value: number): string {
         row-key="code"
       >
         <template #columns>
-          <a-table-column title="基金" data-index="name" />
+          <a-table-column title="标的" data-index="name" />
           <a-table-column title="代码" data-index="code" :width="110" />
           <a-table-column title="类型" :width="80">
             <template #cell="{ record }">{{ kindLabel(record.kind) || record.type || '—' }}</template>
@@ -77,6 +91,21 @@ function formatValue(format: string, value: number): string {
           </a-table-column>
         </template>
       </a-table>
+    </a-card>
+
+    <a-card title="最新信号" :bordered="false" class="mt-card">
+      <a-empty v-if="!rulesStore.signals.length" description="暂无信号。去「规则」页创建并启用规则，系统会每 60 秒自动评估。" />
+      <a-list v-else :data="rulesStore.latestSignals" :bordered="false">
+        <template #item="{ item }">
+          <a-list-item class="signal-item">
+            <a-tag :color="signalColor(item.signal)">{{ signalLabel(item.signal) }}</a-tag>
+            <span class="sig-name">{{ item.name }}</span>
+            <span class="sig-rule">{{ item.ruleName }}</span>
+            <span class="sig-conf">置信度 {{ item.confidence }}%</span>
+            <span class="sig-time">{{ fmtTime(item.time) }}</span>
+          </a-list-item>
+        </template>
+      </a-list>
     </a-card>
   </div>
 </template>
@@ -113,5 +142,32 @@ function formatValue(format: string, value: number): string {
 }
 .mt-card {
   margin-top: 16px;
+}
+.signal-item {
+  display: grid;
+  grid-template-columns: 64px 160px 140px 110px 70px;
+  gap: 8px;
+  align-items: center;
+}
+.sig-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sig-rule {
+  color: var(--color-text-2);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sig-conf {
+  color: var(--color-text-2);
+  font-size: 13px;
+}
+.sig-time {
+  color: var(--color-text-3);
+  font-size: 12px;
 }
 </style>

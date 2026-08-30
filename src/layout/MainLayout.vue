@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import {
   IconDashboard,
@@ -8,22 +8,29 @@ import {
 } from '@arco-design/web-vue/es/icon'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { usePortfolioStore } from '@/stores/portfolio'
+import { useRulesStore } from '@/stores/rules'
 
 const route = useRoute()
 const router = useRouter()
 const isMobile = useIsMobile()
 const store = usePortfolioStore()
+const rulesStore = useRulesStore()
 
 onMounted(() => {
-  // 进入应用即尝试拉取行情，未就绪时用本地回退数据
-  store.refresh()
+  // 进入应用即拉取行情 + 评估规则，之后每 60 秒循环
+  const cycle = async () => {
+    await Promise.allSettled([store.refresh(), rulesStore.evaluateAll()])
+  }
+  cycle()
+  const timer = window.setInterval(cycle, 60_000)
+  onUnmounted(() => window.clearInterval(timer))
 })
 
 /** 顶层导航，同时用于侧边栏菜单与底部 Tab */
 const navItems = [
   { key: 'dashboard', label: '总览', icon: IconDashboard },
   { key: 'instruments', label: '标的库', icon: IconStorage },
-  { key: 'monitor', label: '监控', icon: IconNotification },
+  { key: 'rules', label: '规则', icon: IconNotification },
 ]
 
 const activeKey = computed(() => {

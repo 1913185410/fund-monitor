@@ -1,3 +1,13 @@
+---
+title: 投资监控
+emoji: 📈
+colorFrom: blue
+colorTo: purple
+sdk: docker
+pinned: false
+app_port: 8080
+---
+
 # 投资监控（多资产行情 · K线 · MACD · 资金流向）
 
 股票、ETF、场外基金、指数的统一监控终端。支持按代码/名称搜索添加，查看日/周/月 K 线、MACD/MA/RSI/KDJ 指标与资金流向，并内置访问口令保护。

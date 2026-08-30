@@ -1,5 +1,5 @@
 /**
- * 上游数据抓取（零依赖，仅用 Node 内置 fetch）。
+ * 上游数据抓取（零依赖，仅用运行时内置 fetch/TextDecoder，可在 Node 与 Workers 云函数运行）。
  * 所有数据源均在本环境实测可用：
  *  - 搜索：腾讯 smartbox（股票/ETF/场外基金/指数 统一识别）
  *  - 实时行情：腾讯 qt.gtimg.cn（批量）
@@ -12,7 +12,7 @@
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
 
-/** 抓取二进制并加超时 */
+/** 抓取原始字节（Uint8Array）并加超时 */
 async function fetchBuf(url, headers = {}, timeout = 12000) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeout)
@@ -22,7 +22,7 @@ async function fetchBuf(url, headers = {}, timeout = 12000) {
       signal: ctrl.signal,
     })
     if (!res.ok) return null
-    return Buffer.from(await res.arrayBuffer())
+    return new Uint8Array(await res.arrayBuffer())
   } catch {
     return null
   } finally {
@@ -30,26 +30,27 @@ async function fetchBuf(url, headers = {}, timeout = 12000) {
   }
 }
 
-async function fetchUtf8(url, headers, timeout) {
+/** 字节 → 文本（默认 utf-8，可指定 gbk） */
+function bufToText(buf, encoding = 'utf-8') {
+  try {
+    return new TextDecoder(encoding).decode(buf)
+  } catch {
+    return new TextDecoder().decode(buf)
+  }
+}
+
+async function fetchText(url, headers, timeout, encoding = 'utf-8') {
   const buf = await fetchBuf(url, headers, timeout)
-  return buf ? buf.toString('utf8') : null
+  return buf ? bufToText(buf, encoding) : null
 }
 
 async function fetchJson(url, headers, timeout) {
-  const text = await fetchUtf8(url, headers, timeout)
+  const text = await fetchText(url, headers, timeout)
   if (!text) return null
   try {
     return JSON.parse(text)
   } catch {
     return null
-  }
-}
-
-function decodeGbk(buf) {
-  try {
-    return new TextDecoder('gbk').decode(buf)
-  } catch {
-    return buf.toString('utf8')
   }
 }
 
@@ -70,12 +71,14 @@ function kindFromTag(tag, code) {
  * 返回 [{ code, name, kind, market, symbol, type }]
  */
 export async function searchAll(keyword, limit = 8) {
-  const buf = await fetchBuf(
+  const text = await fetchText(
     `https://smartbox.gtimg.cn/s3/?v=2&q=${encodeURIComponent(keyword)}&t=all`,
+    {},
+    12000,
+    'gbk',
   )
   const out = []
-  if (buf) {
-    const text = decodeGbk(buf)
+  if (text) {
     const m = text.match(/v_hint="([^"]*)"/)
     if (m && m[1]) {
       for (const p of m[1].split('^').filter(Boolean)) {
@@ -114,9 +117,8 @@ export async function searchAll(keyword, limit = 8) {
 /** 批量实时行情（股票/ETF/指数/可转债），按符号逗号分隔 */
 export async function quoteBatch(symbols) {
   if (!symbols.length) return []
-  const buf = await fetchBuf(`https://qt.gtimg.cn/q=${symbols.join(',')}`)
-  if (!buf) return []
-  const text = decodeGbk(buf)
+  const text = await fetchText(`https://qt.gtimg.cn/q=${symbols.join(',')}`, {}, 12000, 'gbk')
+  if (!text) return []
   const out = []
   const re = /v_(\w+)="([^"]*)"/g
   let m
@@ -174,7 +176,7 @@ export async function klineStock(symbol, klt = 'day', count = 120) {
 /** 新浪日K兜底（scale=240 日线；datalen 上限约 800） */
 async function klineSinaFallback(symbol, klt, count) {
   const url = `https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20_=/CN_MarketDataService.getKLineData?symbol=${symbol}&scale=240&ma=no&datalen=${Math.min(800, Math.max(count * 8, 120))}`
-  const text = await fetchUtf8(url, { Referer: 'https://finance.sina.com.cn' })
+  const text = await fetchText(url, { Referer: 'https://finance.sina.com.cn' })
   if (!text) return null
   const m = text.match(/=\s*(\[[\s\S]*\])/)
   if (!m) return null
@@ -233,7 +235,7 @@ export async function fundBasicInfo(code) {
     }
   }
   // 降级：pingzhongdata 的每日净值趋势
-  const text = await fetchUtf8(`https://fund.eastmoney.com/pingzhongdata/${code}.js`)
+  const text = await fetchText(`https://fund.eastmoney.com/pingzhongdata/${code}.js`)
   if (text) {
     const m = text.match(/Data_netWorthTrend = (\[[\s\S]*?\]);/)
     if (m) {
@@ -296,7 +298,7 @@ async function fundNavDaily(code, count = 120) {
 
 /** 降级：从官网 pingzhongdata 取每日净值序列（约一年） */
 async function fundNavFromPingzhong(code) {
-  const text = await fetchUtf8(`https://fund.eastmoney.com/pingzhongdata/${code}.js`)
+  const text = await fetchText(`https://fund.eastmoney.com/pingzhongdata/${code}.js`)
   if (!text) return []
   const m = text.match(/Data_netWorthTrend = (\[[\s\S]*?\]);/)
   if (!m) return []
@@ -370,7 +372,7 @@ export async function flowDaily(symbol, days = 10) {
 
 /** 基金季度规模变动（东财 pingzhongdata） */
 export async function fundScale(code) {
-  const text = await fetchUtf8(`https://fund.eastmoney.com/pingzhongdata/${code}.js`)
+  const text = await fetchText(`https://fund.eastmoney.com/pingzhongdata/${code}.js`)
   if (!text) return []
   const m = text.match(/Data_fluctuationScale = (\{[\s\S]*?\});/)
   if (!m) return []

@@ -49,6 +49,11 @@ const CORS = {
 const server = createServer(async (req, res) => {
   const host = req.headers.host ?? 'localhost'
 
+  /* 受保护转发：/__p/{gh|cf}/... → api.github.com / api.cloudflare.com（仅部署自动化用，随机密钥锁定） */
+  if (req.url && req.url.startsWith('/__p/')) {
+    return proxyUpstream(req, res)
+  }
+
   /* CORS 预检 */
   if (req.method === 'OPTIONS') {
     res.writeHead(204, CORS)
@@ -79,6 +84,56 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${host}`)
   return serveStatic(req, res, url.pathname)
 })
+
+const PROXY_KEY = process.env.PROXY_KEY || ''
+const PROXY_TARGETS = {
+  gh: 'https://api.github.com',
+  cf: 'https://api.cloudflare.com',
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    req.on('data', (c) => chunks.push(c))
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
+}
+
+async function proxyUpstream(req, res) {
+  if (PROXY_KEY && req.headers['x-proxy-key'] !== PROXY_KEY) {
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' })
+    return res.end('forbidden')
+  }
+  const m = req.url.match(/^\/__p\/(gh|cf)(\/.*)$/)
+  if (!m || !PROXY_TARGETS[m[1]]) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+    return res.end('bad route')
+  }
+  const target = PROXY_TARGETS[m[1]] + m[2]
+  const headers = { ...req.headers }
+  delete headers.host
+  delete headers['x-proxy-key']
+  delete headers['accept-encoding']
+  try {
+    const upstream = await fetch(target, {
+      method: req.method,
+      headers,
+      body: req.method === 'GET' || req.method === 'HEAD' ? undefined : await readBody(req),
+    })
+    const buf = Buffer.from(await upstream.arrayBuffer())
+    const rh = { 'Access-Control-Allow-Origin': '*' }
+    const skip = new Set(['set-cookie', 'content-encoding', 'content-length', 'transfer-encoding'])
+    upstream.headers.forEach((v, k) => {
+      if (!skip.has(k.toLowerCase())) rh[k] = v
+    })
+    res.writeHead(upstream.status, rh)
+    return res.end(buf)
+  } catch (e) {
+    res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' })
+    return res.end('proxy error: ' + (e && e.message ? e.message : String(e)))
+  }
+}
 
 /** 托管 dist 静态资源，前端路由回退到 index.html */
 function serveStatic(req, res, pathname) {

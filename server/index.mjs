@@ -9,11 +9,20 @@
 import { createServer } from 'node:http'
 import { existsSync, readFileSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { handleApiRequest } from './api-core.mjs'
 
 const HOST = '0.0.0.0'
 const PORT = Number(process.env.PORT || 8080)
-const DIST = 'dist'
+/** 本地（server/ 下运行时为 ../dist）与 Web 函数压缩包（根目录 ./dist）都兼容 */
+function resolveDist() {
+  const here = fileURLToPath(new URL('.', import.meta.url))
+  for (const p of [join(here, 'dist'), join(here, '..', 'dist')]) {
+    if (existsSync(p)) return p
+  }
+  return join(here, 'dist')
+}
+const DIST = resolveDist()
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN
 
 const MIME = {
@@ -29,8 +38,23 @@ const MIME = {
   '.txt': 'text/plain; charset=utf-8',
 }
 
+/** 跨域（前端静态页在 COS，API 在云函数，二者不同源） */
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Auth-Token',
+  'Access-Control-Expose-Headers': '*',
+}
+
 const server = createServer(async (req, res) => {
   const host = req.headers.host ?? 'localhost'
+
+  /* CORS 预检 */
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, CORS)
+    return res.end()
+  }
+
   let response = null
   try {
     const request = new Request(`http://${host}${req.url}`, {
@@ -47,7 +71,7 @@ const server = createServer(async (req, res) => {
   }
 
   if (response) {
-    res.writeHead(response.status, Object.fromEntries(response.headers))
+    res.writeHead(response.status, { ...CORS, ...Object.fromEntries(response.headers) })
     const body = response.body ? Buffer.from(await response.arrayBuffer()) : null
     return res.end(body)
   }

@@ -78,7 +78,9 @@ async function toScfResponse(res) {
   return { statusCode: res.status, headers, body, isBase64Encoded: false }
 }
 
-/** 静态资源（含 SPA 回退） */
+/** 静态资源（含 SPA 回退）。
+ * 注意：函数 URL 的响应契约是 { statusCode, headers, body }，body 为纯字符串，
+ * 不支持 isBase64Encoded（会导致平台强制 attachment 触发下载）。本项目 dist 全部为文本文件，直接以 UTF-8 返回。 */
 function serveStatic(pathname) {
   let p = decodeURIComponent((pathname || '/').split('?')[0])
   if (p === '/' || p === '') p = '/index.html'
@@ -87,8 +89,7 @@ function serveStatic(pathname) {
     return {
       statusCode: 200,
       headers: { 'Content-Type': MIME[extname(file).toLowerCase()] || 'application/octet-stream' },
-      body: readFileSync(file).toString('base64'),
-      isBase64Encoded: true,
+      body: readFileSync(file, 'utf-8'),
     }
   }
   const idx = join(DIST_ROOT, 'index.html')
@@ -96,8 +97,7 @@ function serveStatic(pathname) {
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
-      body: readFileSync(idx).toString('base64'),
-      isBase64Encoded: true,
+      body: readFileSync(idx, 'utf-8'),
     }
   }
   return { statusCode: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: 'not found' }

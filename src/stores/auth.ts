@@ -28,18 +28,24 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  /** 提交口令：成功则服务端种 Cookie 并返回 true */
+  /** 提交口令：成功则保存令牌（跨域 Bearer 鉴权）并刷新登录态 */
   async function login(token: string): Promise<boolean> {
     error.value = ''
     try {
-      const res = await fetch(`/api/auth?token=${encodeURIComponent(token)}`)
-      const finalUrl = res.url || ''
-      if (finalUrl.includes('?e=1')) {
+      const base = import.meta.env.VITE_API_BASE_URL ?? ''
+      const res = await fetch(`${base}/api/auth?token=${encodeURIComponent(token)}`)
+      if (!res.ok) {
         error.value = '口令不正确，请重试'
         return false
       }
-      await init()
-      return authed.value
+      const data = await res.json()
+      if (data?.ok) {
+        if (data.token) localStorage.setItem('fm_token', data.token)
+        await init()
+        return authed.value
+      }
+      error.value = '口令不正确，请重试'
+      return false
     } catch {
       error.value = '网络错误，请重试'
       return false

@@ -55,7 +55,11 @@ function cached(key, ttl, fn) {
 
 async function isAuthed(request, env) {
   if (!env.ACCESS_TOKEN) return true
-  return getCookie(request, COOKIE_NAME) === (await sha256Hex(env.ACCESS_TOKEN))
+  const hash = await sha256Hex(env.ACCESS_TOKEN)
+  if (getCookie(request, COOKIE_NAME) === hash) return true
+  const auth = request.headers.get('authorization') || ''
+  if (auth.startsWith('Bearer ')) return auth.slice(7) === hash
+  return request.headers.get('x-auth-token') === hash
 }
 
 function parseKlt(v) {
@@ -68,21 +72,20 @@ export async function handleApiRequest(request, env = {}) {
   const path = url.pathname
   if (!path.startsWith('/api/')) return null
 
-  /* 登录 */
+  /* 登录：校验口令，返回令牌（Bearer 鉴权，跨域可用）；同时种 Cookie 兼容同源 */
   if (path === '/api/auth') {
     const t = url.searchParams.get('token') || ''
     if (env.ACCESS_TOKEN && t === env.ACCESS_TOKEN) {
       const cookieVal = await sha256Hex(env.ACCESS_TOKEN)
-      return new Response(null, {
-        status: 302,
-        headers: {
-          Location: '/',
-          'Set-Cookie': `${COOKIE_NAME}=${cookieVal}; Path=/; HttpOnly; Max-Age=2592000; SameSite=Lax`,
-        },
-      })
+      const res = json(200, { ok: true, token: cookieVal })
+      res.headers.append(
+        'Set-Cookie',
+        `${COOKIE_NAME}=${cookieVal}; Path=/; HttpOnly; Max-Age=2592000; SameSite=Lax`,
+      )
+      return res
     }
-    if (!env.ACCESS_TOKEN) return new Response(null, { status: 302, headers: { Location: '/' } })
-    return new Response(null, { status: 302, headers: { Location: '/?e=1' } })
+    if (!env.ACCESS_TOKEN) return json(200, { ok: true, token: '' })
+    return json(401, { ok: false, message: '口令不正确' })
   }
 
   /* 前端登录门探针 */

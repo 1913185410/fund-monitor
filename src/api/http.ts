@@ -11,7 +11,7 @@ export async function getJSON<T>(path: string, timeout = 20000): Promise<T> {
   try {
     const res = await fetch(`${base}/api${path}`, {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', ...authHeaders() },
       signal: controller.signal,
     })
     if (!res.ok) {
@@ -34,7 +34,7 @@ export async function getRaw(
   try {
     const res = await fetch(`${base}/api${path}`, {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', ...authHeaders() },
       signal: controller.signal,
     })
     if (!res.ok) {
@@ -45,4 +45,10 @@ export async function getRaw(
   } finally {
     window.clearTimeout(timer)
   }
+}
+
+/** 跨域鉴权：登录成功后把服务端返回的令牌存到 localStorage，随请求以 Bearer 头发送 */
+function authHeaders(): Record<string, string> {
+  const t = typeof localStorage !== 'undefined' ? localStorage.getItem('fm_token') : null
+  return t ? { Authorization: `Bearer ${t}` } : {}
 }

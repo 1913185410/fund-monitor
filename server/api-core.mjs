@@ -10,7 +10,7 @@
  */
 import { searchAll, quoteBatch, klineStock, klineFund, flowDaily, fundScale, fundBasicInfo, sectorsTop } from './data.mjs'
 import { computeIndicators } from './indicators.mjs'
-import { cosGetJson, cosPutJson } from './cos-store.mjs'
+import { loadState, saveState } from './state-store.mjs'
 import { tc3Call } from './tc3.mjs'
 
 const COOKIE_NAME = 'fm_auth'
@@ -189,10 +189,10 @@ export async function handleApiRequest(request, env = {}) {
     return info ? json(200, info) : json(404, { code: detailMatch[1], message: '未取到该基金' })
   }
 
-  /* 应用状态（自选股/规则/设置）跨设备同步：存于 COS */
+  /* 应用状态（自选股/规则/设置）跨设备同步：云端落地点为 KV（Workers）或 COS（Node/SCF） */
   if (path === '/api/state') {
     if (request.method === 'GET') {
-      const data = await cached(STATE_CACHE_KEY, 5000, () => cosGetJson('state/profile.json'))
+      const data = await cached(STATE_CACHE_KEY, 5000, () => loadState(env))
       // 云端没有数据或列表为空时返回 null，前端据此跳过覆盖，保留本地数据（避免误清空）
       const portfolio = Array.isArray(data?.portfolio) && data.portfolio.length > 0 ? data.portfolio : null
       const rules = Array.isArray(data?.rules) && data.rules.length > 0 ? data.rules : null
@@ -205,7 +205,7 @@ export async function handleApiRequest(request, env = {}) {
     if (request.method === 'PUT') {
       const body = await request.json().catch(() => null)
       if (!body) return json(400, { ok: false, message: '参数错误' })
-      await cosPutJson('state/profile.json', {
+      await saveState(env, {
         portfolio: Array.isArray(body.portfolio) ? body.portfolio : [],
         rules: Array.isArray(body.rules) ? body.rules : [],
         settings: { notify: !!body.settings?.notify },

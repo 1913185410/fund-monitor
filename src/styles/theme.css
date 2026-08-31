@@ -1,0 +1,19 @@
+/* 全局主题补全：让页面底色跟随 Arco 明暗主题
+ * Arco 的 [arco-theme=dark] 只改变组件内部样式，不会给 body 设背景，
+ * 因此暗色模式下大块留白仍是浏览器默认白色。这里用 Arco 自带的
+ * --color-bg-1（亮色=#fff / 暗色=深灰）统一铺底，确保整页「全黑」。 */
+
+html,
+body,
+#app {
+  background-color: var(--color-bg-1);
+  transition: background-color 0.2s ease;
+}
+
+/* 暗色下让滚动条、原生表单控件等也走深色渲染（部分浏览器需要 color-scheme） */
+[arco-theme='dark'] {
+  color-scheme: dark;
+}
+[arco-theme='dark'] body {
+  color: var(--color-text-1);
+}

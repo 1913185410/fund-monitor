@@ -12,6 +12,8 @@ export const useSyncStore = defineStore('sync', () => {
   const lastSyncedAt = ref<number | null>(null)
   const error = ref<string | null>(null)
   const loading = ref(false)
+  const pulling = ref(false)
+  const pushing = ref(false)
   let pushTimer: number | null = null
   let applying = false
   let watching = false
@@ -39,8 +41,9 @@ export const useSyncStore = defineStore('sync', () => {
     return { localNewer }
   }
 
-  /** 从云端拉取状态并覆盖本地 */
+  /** 云端 → 本地：从云端拉取状态并覆盖本地 */
   async function pull() {
+    pulling.value = true
     loading.value = true
     try {
       const s = await stateApi.getState()
@@ -52,16 +55,19 @@ export const useSyncStore = defineStore('sync', () => {
     } catch (e) {
       error.value = e instanceof Error ? e.message : '同步失败'
     } finally {
+      pulling.value = false
       loading.value = false
     }
   }
 
-  /** 把本地状态推送到云端 */
+  /** 本地 → 云端：把本地当前状态推送到云端 */
   async function push() {
     if (pushTimer) {
       window.clearTimeout(pushTimer)
       pushTimer = null
     }
+    pushing.value = true
+    loading.value = true
     try {
       const p = usePortfolioStore()
       const r = useRulesStore()
@@ -71,6 +77,9 @@ export const useSyncStore = defineStore('sync', () => {
       error.value = null
     } catch (e) {
       error.value = e instanceof Error ? e.message : '同步失败'
+    } finally {
+      pushing.value = false
+      loading.value = false
     }
   }
 
@@ -98,5 +107,5 @@ export const useSyncStore = defineStore('sync', () => {
     watch(() => st.notify, markDirty)
   }
 
-  return { lastSyncedAt, error, loading, pull, push, markDirty, init }
+  return { lastSyncedAt, error, loading, pulling, pushing, pull, push, markDirty, init }
 })

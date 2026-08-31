@@ -54,7 +54,7 @@ const list = computed(() => store.items)
   align-items: flex-start;
   gap: 10px;
   padding: 12px 12px;
-  background: #fff;
+  background: var(--color-bg-2);
   border: 1px solid var(--color-border-2);
   border-left: 3px solid #165dff;
   border-radius: 10px;

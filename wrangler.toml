@@ -1,0 +1,8 @@
+name = "fund-monitor"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-08-30"
+
+# 跨设备同步状态存储：Cloudflare KV（Workers 原生，替代腾讯云 COS）
+kv_namespaces = [
+  { binding = "FM_STATE", id = "816984886c894c91b92e76ca881b5426" }
+]

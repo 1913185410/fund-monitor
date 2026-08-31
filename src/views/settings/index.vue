@@ -78,7 +78,7 @@ async function onChangePwd() {
     <a-card title="数据同步" :bordered="false" class="scard">
       <div class="row">
         <div class="row-text">
-          <div class="row-title">跨设备同步</div>
+          <div class="row-title">跨设备同步（云端 ↔ 本机）</div>
           <div class="row-desc">
             自选股与规则保存在云端，换设备登录后自动恢复。
             <template v-if="sync.lastSyncedAt">最近同步：{{ fmtTime(sync.lastSyncedAt) }}</template>
@@ -86,7 +86,20 @@ async function onChangePwd() {
             <span v-if="sync.error" class="err">（{{ sync.error }}）</span>
           </div>
         </div>
-        <a-button size="small" :loading="sync.loading" @click="sync.pull">立即同步</a-button>
+      </div>
+      <div class="sync-actions">
+        <a-button size="small" :loading="sync.pulling" @click="sync.pull">
+          <template #icon><icon-download /></template>
+          从云端恢复
+        </a-button>
+        <a-button size="small" type="primary" :loading="sync.pushing" @click="sync.push">
+          <template #icon><icon-upload /></template>
+          备份到云端
+        </a-button>
+      </div>
+      <div class="sync-hint">
+        「从云端恢复」用云端数据覆盖本机；「备份到云端」把本机当前数据上传。
+        本机数据变更后会自动备份一次。
       </div>
     </a-card>
 
@@ -109,7 +122,7 @@ async function onChangePwd() {
     <a-card title="关于" :bordered="false" class="scard">
       <div class="about">
         <div>多资产投资监控终端</div>
-        <div class="dim">页面托管于 Cloudflare Pages · 数据接口与同步存储位于腾讯云</div>
+        <div class="dim">页面托管于 Cloudflare Pages · 同步存储位于 Cloudflare KV</div>
       </div>
     </a-card>
   </div>
@@ -144,6 +157,18 @@ async function onChangePwd() {
 }
 .err {
   color: rgb(var(--red-6));
+}
+.sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.sync-hint {
+  color: var(--color-text-3);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 8px;
 }
 .tip {
   color: var(--color-text-3);

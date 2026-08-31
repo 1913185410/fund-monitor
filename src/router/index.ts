@@ -30,6 +30,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/rules/index.vue'),
         meta: { title: '规则' },
       },
+      {
+        path: 'settings',
+        name: 'settings',
+        component: () => import('@/views/settings/index.vue'),
+        meta: { title: '设置' },
+      },
     ],
   },
   { path: '/funds', redirect: '/instruments' },

@@ -2,8 +2,10 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { instrumentApi } from '@/api/instrument'
 import { usePortfolioStore } from '@/stores/portfolio'
+import { useSettingsStore } from '@/stores/settings'
 import { computeMetrics, evaluateRule, type Metrics, type RuleResult } from '@/engine/evaluate'
-import { FIELD_META, type Rule, type Signal, type FieldKey } from '@/types/rule'
+import { FIELD_META, SIGNAL_LABEL, type Rule, type Signal, type FieldKey } from '@/types/rule'
+import { showNotification } from '@/utils/notify'
 import type { Instrument, InstrumentKind } from '@/types/instrument'
 
 const RULES_KEY = 'fm:rules'
@@ -76,6 +78,12 @@ export const useRulesStore = defineStore('rules', () => {
   function clearSignals() {
     signals.value = []
     persistSignals()
+  }
+
+  /** 用云端规则整体替换（跨设备拉取同步用，不触发回写） */
+  function replaceAll(list: Rule[]) {
+    rules.value = Array.isArray(list) ? list : []
+    persistRules()
   }
 
   const enabledCount = computed(() => rules.value.filter((r) => r.enabled).length)
@@ -155,6 +163,18 @@ export const useRulesStore = defineStore('rules', () => {
       }
       persistSignals()
       lastEvalAt.value = now
+
+      /* 浏览器通知：设置了开启且本次有新增信号时弹通知（仅页面打开期间有效） */
+      if (added > 0) {
+        const st = useSettingsStore()
+        if (st.notify) {
+          for (const s of signals.value.slice(0, added)) {
+            showNotification(`${s.name} · ${SIGNAL_LABEL[s.signal] ?? s.signal}`, {
+              body: `${s.ruleName} · 置信度 ${s.confidence}%`,
+            })
+          }
+        }
+      }
     } catch (e) {
       error.value = e instanceof Error ? e.message : '规则评估失败'
     } finally {
@@ -199,6 +219,7 @@ export const useRulesStore = defineStore('rules', () => {
     updateRule,
     removeRule,
     clearSignals,
+    replaceAll,
     evaluateAll,
     testRule,
     fieldsFor,

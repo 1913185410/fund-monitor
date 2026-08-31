@@ -5,19 +5,24 @@ import {
   IconDashboard,
   IconStorage,
   IconNotification,
+  IconSettings,
 } from '@arco-design/web-vue/es/icon'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { usePortfolioStore } from '@/stores/portfolio'
 import { useRulesStore } from '@/stores/rules'
+import { useSyncStore } from '@/stores/sync'
 
 const route = useRoute()
 const router = useRouter()
 const isMobile = useIsMobile()
 const store = usePortfolioStore()
 const rulesStore = useRulesStore()
+const sync = useSyncStore()
 
 onMounted(() => {
-  // 进入应用即拉取行情 + 评估规则，之后每 60 秒循环
+  // 启动：先拉取云端状态（自选股/规则/设置），再进入行情 + 规则循环
+  void sync.init()
+  void sync.pull()
   const cycle = async () => {
     await Promise.allSettled([store.refresh(), rulesStore.evaluateAll()])
   }
@@ -31,6 +36,7 @@ const navItems = [
   { key: 'dashboard', label: '总览', icon: IconDashboard },
   { key: 'instruments', label: '标的库', icon: IconStorage },
   { key: 'rules', label: '规则', icon: IconNotification },
+  { key: 'settings', label: '设置', icon: IconSettings },
 ]
 
 const activeKey = computed(() => {

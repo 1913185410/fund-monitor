@@ -62,6 +62,12 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     }
   }
 
+  /** 用云端数据整体替换（跨设备拉取同步用，不触发回写） */
+  function replaceAll(list: Instrument[]) {
+    funds.value = Array.isArray(list) ? list.map(migrate) : []
+    persist()
+  }
+
   /** 拉取实时行情：股票/ETF 走腾讯批量，场外基金走东财，叠加到自选列表 */
   async function refresh() {
     const symbols = funds.value.filter((f) => f.kind !== 'fund' && f.symbol).map((f) => f.symbol!)
@@ -178,6 +184,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     addFromResult,
     addFund,
     removeFund,
+    replaceAll,
     totalHoldingAmount,
     todayProfit,
     totalProfit,

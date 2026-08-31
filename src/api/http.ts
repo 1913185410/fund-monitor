@@ -52,3 +52,25 @@ function authHeaders(): Record<string, string> {
   const t = typeof localStorage !== 'undefined' ? localStorage.getItem('fm_token') : null
   return t ? { Authorization: `Bearer ${t}` } : {}
 }
+
+/** 发送 PUT/POST（JSON body），失败时抛出服务端 message */
+export async function send<T>(path: string, method: 'PUT' | 'POST', body: unknown, timeout = 20000): Promise<T> {
+  const base = import.meta.env.VITE_API_BASE_URL ?? ''
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), timeout)
+  try {
+    const res = await fetch(`${base}/api${path}`, {
+      method,
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => null)
+      throw new Error(data?.message || `请求失败：${res.status} ${path}`)
+    }
+    return (await res.json()) as T
+  } finally {
+    window.clearTimeout(timer)
+  }
+}

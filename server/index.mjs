@@ -65,6 +65,10 @@ const server = createServer(async (req, res) => {
     const request = new Request(`http://${host}${req.url}`, {
       method: req.method,
       headers: req.headers,
+      body:
+        req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS'
+          ? undefined
+          : await readBody(req),
     })
     response = await handleApiRequest(request, { ACCESS_TOKEN })
   } catch (e) {

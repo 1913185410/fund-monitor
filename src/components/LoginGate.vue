@@ -43,12 +43,12 @@ async function submit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f2f4f8;
+  background: var(--color-bg-1);
   padding: 16px;
   box-sizing: border-box;
 }
 .login-card {
-  background: #fff;
+  background: var(--color-bg-2);
   border-radius: 14px;
   padding: 36px 32px;
   width: min(90vw, 360px);

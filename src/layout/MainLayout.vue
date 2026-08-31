@@ -6,6 +6,7 @@ import {
   IconStorage,
   IconNotification,
   IconSettings,
+  IconTool,
 } from '@arco-design/web-vue/es/icon'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { usePortfolioStore } from '@/stores/portfolio'
@@ -36,6 +37,7 @@ const navItems = [
   { key: 'dashboard', label: '总览', icon: IconDashboard },
   { key: 'instruments', label: '标的库', icon: IconStorage },
   { key: 'rules', label: '规则', icon: IconNotification },
+  { key: 'tools', label: '回测', icon: IconTool },
   { key: 'settings', label: '设置', icon: IconSettings },
 ]
 

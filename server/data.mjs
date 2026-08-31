@@ -7,6 +7,7 @@
  *  - 资金流：新浪 MoneyFlow（日级，股票/ETF）
  *  - 基金净值/名称：东方财富（沿用）
  *  - 基金规模变动：东财 pingzhongdata（季度）
+ *  - 行业板块涨跌榜：东财 push2（行业板块列表）
  */
 
 const UA =
@@ -66,17 +67,26 @@ async function fetchJson(url, headers, timeout) {
 
 /**
  * 统一搜索（股票/ETF/基金/指数）：腾讯 smartbox 为主，东财基金联想为兜底。
- * 云端只负责抓取原始字节并以 base64 回传（含编码标记），GBK 解码交给浏览器，
- * 避免 Cloudflare Workers 运行时不支持 gbk 导致中文乱码。
- * 返回 { enc:'gbk'|'utf-8', raw: base64 } 或 null。
+ * smartbox 返回的名称/拼音字段是 JSON 风格 \uXXXX 转义（如 \u9ec4\u91d1 = 黄金），
+ * 这里在云端还原成真实中文后再以 UTF-8 回传（前端按 enc 标记解码即可）。
+ * 返回 { enc:'utf-8', raw: base64 } 或 null。
  */
+function unescapeUnicode(s) {
+  return s.replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+}
+
 export async function searchAll(keyword, limit = 8) {
   const buf = await fetchBuf(
     `https://smartbox.gtimg.cn/s3/?v=2&q=${encodeURIComponent(keyword)}&t=all`,
     {},
     12000,
   )
-  if (buf && buf.length) return { enc: 'gbk', raw: bytesToBase64(buf) }
+  if (buf && buf.length) {
+    // 云端解 GBK + 还原 \uXXXX 转义，输出 UTF-8（前端无需改动）
+    const text = bufToText(buf, 'gbk')
+    const unescaped = unescapeUnicode(text)
+    return { enc: 'utf-8', raw: bytesToBase64(new TextEncoder().encode(unescaped)) }
+  }
   // 兜底：东财基金联想（UTF-8）
   const text = await fetchText(
     `http://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx?m=1&key=${encodeURIComponent(keyword)}&_=${Date.now()}`,
@@ -335,4 +345,30 @@ export async function fundScale(code) {
   } catch {
     return []
   }
+}
+
+/** 行业板块涨跌榜（东财 push2 行业板块；direction up=涨幅榜 / down=跌幅榜） */
+const SECTOR_HOSTS = ['https://push2delay.eastmoney.com', 'https://push2.eastmoney.com']
+
+export async function sectorsTop(direction = 'up', limit = 10) {
+  const po = direction === 'down' ? 0 : 1
+  const fields = 'f2,f3,f12,f14,f62,f128,f140,f136'
+  const path = `/api/qt/clist/get?pn=1&pz=${Math.max(1, Math.min(50, limit))}&po=${po}&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2+f:!50&fields=${fields}`
+  for (const host of SECTOR_HOSTS) {
+    const json = await fetchJson(`${host}${path}`, { Referer: 'https://quote.eastmoney.com/' })
+    const diff = json?.data?.diff
+    if (Array.isArray(diff) && diff.length) {
+      return diff.map((r) => ({
+        code: r.f12 ?? '',
+        name: r.f14 ?? '',
+        changePct: Number(r.f3) || 0,
+        index: Number(r.f2) || 0,
+        mainNet: Number(r.f62) || 0,
+        leaderName: r.f128 ?? '',
+        leaderCode: r.f140 ?? '',
+        leaderChangePct: Number(r.f136) || 0,
+      }))
+    }
+  }
+  return []
 }

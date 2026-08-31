@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { Message } from '@arco-design/web-vue'
+import '@arco-design/web-vue/es/message/style/css.js'
 import { IconSearch } from '@arco-design/web-vue/es/icon'
 import { useRouter } from 'vue-router'
 import { usePortfolioStore } from '@/stores/portfolio'

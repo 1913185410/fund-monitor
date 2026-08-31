@@ -31,6 +31,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '规则' },
       },
       {
+        path: 'tools',
+        name: 'tools',
+        component: () => import('@/views/tools/index.vue'),
+        meta: { title: '回测' },
+      },
+      {
         path: 'settings',
         name: 'settings',
         component: () => import('@/views/settings/index.vue'),

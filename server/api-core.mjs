@@ -8,7 +8,7 @@
  *   const resp = await handleApiRequest(request, { ACCESS_TOKEN: 'xxx' })
  *   // resp === null 表示非 /api 路径（由外层负责静态资源）
  */
-import { searchAll, quoteBatch, klineStock, klineFund, flowDaily, fundScale, fundBasicInfo } from './data.mjs'
+import { searchAll, quoteBatch, klineStock, klineFund, flowDaily, fundScale, fundBasicInfo, sectorsTop } from './data.mjs'
 import { computeIndicators } from './indicators.mjs'
 import { cosGetJson, cosPutJson } from './cos-store.mjs'
 import { tc3Call } from './tc3.mjs'
@@ -150,6 +150,14 @@ export async function handleApiRequest(request, env = {}) {
     return json(200, { mode: 'daily', points })
   }
 
+  /* 行业板块涨跌榜（公共信息） */
+  if (path === '/api/sectors/top') {
+    const direction = url.searchParams.get('direction') === 'down' ? 'down' : 'up'
+    const limit = Math.min(50, Math.max(5, Number(url.searchParams.get('limit')) || 10))
+    const data = await cached(`sectors:${direction}:${limit}`, 60_000, () => sectorsTop(direction, limit))
+    return json(200, { direction, list: data })
+  }
+
   /* 基金实时（沿用） */
   if (path === '/api/fund-info') {
     const code = (url.searchParams.get('code') || '').trim()
@@ -185,10 +193,13 @@ export async function handleApiRequest(request, env = {}) {
   if (path === '/api/state') {
     if (request.method === 'GET') {
       const data = await cached(STATE_CACHE_KEY, 5000, () => cosGetJson('state/profile.json'))
+      // 云端没有数据或列表为空时返回 null，前端据此跳过覆盖，保留本地数据（避免误清空）
+      const portfolio = Array.isArray(data?.portfolio) && data.portfolio.length > 0 ? data.portfolio : null
+      const rules = Array.isArray(data?.rules) && data.rules.length > 0 ? data.rules : null
       return json(200, {
-        portfolio: Array.isArray(data?.portfolio) ? data.portfolio : [],
-        rules: Array.isArray(data?.rules) ? data.rules : [],
-        settings: { notify: !!data?.settings?.notify },
+        portfolio,
+        rules,
+        settings: { notify: data?.settings?.notify === true },
       })
     }
     if (request.method === 'PUT') {

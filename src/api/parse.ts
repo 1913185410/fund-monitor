@@ -14,6 +14,11 @@ function decodeRaw(env: { enc: string; raw: string } | null): string | null {
   return dec.decode(bytes)
 }
 
+/** smartbox 返回的名称/拼音字段是 JSON 风格 \uXXXX 转义（如 \u9ec4\u91d1 = 黄金），还原为真实中文 */
+function unescapeField(s: string): string {
+  return s.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+}
+
 /** smartbox 类型标签 → 统一标的类型 */
 function kindFromTag(tag: string, code: string): SearchResult['kind'] {
   if (/ETF/i.test(tag)) return 'etf'
@@ -52,8 +57,9 @@ export function parseSearch(env: { enc: string; raw: string } | null, limit = 20
   if (!m || !m[1]) return []
   const out: SearchResult[] = []
   for (const p of m[1].split('^').filter(Boolean)) {
-    const [market, code, name, , kindTag] = p.split('~')
-    if (!code || !name) continue
+    const [market, code, rawName, , kindTag] = p.split('~')
+    if (!code || !rawName) continue
+    const name = unescapeField(rawName)
     const kind = kindFromTag(kindTag || '', code)
     out.push({
       code,

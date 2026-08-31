@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { Message, Modal } from '@arco-design/web-vue'
+import '@arco-design/web-vue/es/message/style/css.js'
+import '@arco-design/web-vue/es/modal/style/css.js'
 import { usePortfolioStore } from '@/stores/portfolio'
 import { useRulesStore } from '@/stores/rules'
 import { FIELD_META, OP_LABEL, SIGNAL_LABEL, type Rule, type RuleCondition, type RuleOp } from '@/types/rule'

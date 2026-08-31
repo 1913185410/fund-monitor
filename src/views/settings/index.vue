@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { Message } from '@arco-design/web-vue'
+import '@arco-design/web-vue/es/message/style/css.js'
 import { useSettingsStore } from '@/stores/settings'
 import { useSyncStore } from '@/stores/sync'
 import { useAuthStore } from '@/stores/auth'

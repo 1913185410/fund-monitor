@@ -16,19 +16,27 @@ export const useSyncStore = defineStore('sync', () => {
   let applying = false
   let watching = false
 
-  /** 应用云端状态到本地（拉取时调用，不触发回写） */
+  /** 应用云端状态到本地（拉取时调用，不触发回写）；云端为空而本地有数据时保留本地，避免误清空 */
   function applyState(s: { portfolio?: unknown; rules?: unknown; settings?: { notify?: boolean } }) {
     const p = usePortfolioStore()
     const r = useRulesStore()
     const st = useSettingsStore()
     applying = true
+    let localNewer = false
     try {
-      if (Array.isArray(s.portfolio)) p.replaceAll(s.portfolio as never)
-      if (Array.isArray(s.rules)) r.replaceAll(s.rules as never)
+      if (Array.isArray(s.portfolio)) {
+        if (s.portfolio.length === 0 && p.funds.length > 0) localNewer = true
+        else p.replaceAll(s.portfolio as never)
+      }
+      if (Array.isArray(s.rules)) {
+        if (s.rules.length === 0 && r.rules.length > 0) localNewer = true
+        else r.replaceAll(s.rules as never)
+      }
       if (s.settings && typeof s.settings.notify === 'boolean') st.notify = s.settings.notify
     } finally {
       applying = false
     }
+    return { localNewer }
   }
 
   /** 从云端拉取状态并覆盖本地 */
@@ -36,7 +44,9 @@ export const useSyncStore = defineStore('sync', () => {
     loading.value = true
     try {
       const s = await stateApi.getState()
-      applyState(s)
+      const { localNewer } = applyState(s)
+      // 本地有数据而云端为空时，回推一次，让云端恢复
+      if (localNewer) void push()
       lastSyncedAt.value = Date.now()
       error.value = null
     } catch (e) {

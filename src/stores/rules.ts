@@ -6,6 +6,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { computeMetrics, evaluateRule, type Metrics, type RuleResult } from '@/engine/evaluate'
 import { FIELD_META, SIGNAL_LABEL, type Rule, type Signal, type FieldKey } from '@/types/rule'
 import { showNotification } from '@/utils/notify'
+import { useAnnounceStore } from '@/stores/announce'
 import type { Instrument, InstrumentKind } from '@/types/instrument'
 
 const RULES_KEY = 'fm:rules'
@@ -164,12 +165,19 @@ export const useRulesStore = defineStore('rules', () => {
       persistSignals()
       lastEvalAt.value = now
 
-      /* 浏览器通知：设置了开启且本次有新增信号时弹通知（仅页面打开期间有效） */
+      /* 提醒：新增信号弹应用内公告（可点击关闭），浏览器通知作为可选附加通道 */
       if (added > 0) {
+        const announce = useAnnounceStore()
         const st = useSettingsStore()
-        if (st.notify) {
-          for (const s of signals.value.slice(0, added)) {
-            showNotification(`${s.name} · ${SIGNAL_LABEL[s.signal] ?? s.signal}`, {
+        for (const s of signals.value.slice(0, added)) {
+          const label = SIGNAL_LABEL[s.signal] ?? s.signal
+          announce.push({
+            kind: 'signal',
+            title: `${s.name} · ${label}`,
+            body: `${s.ruleName} · 置信度 ${s.confidence}%`,
+          })
+          if (st.notify) {
+            showNotification(`${s.name} · ${label}`, {
               body: `${s.ruleName} · 置信度 ${s.confidence}%`,
             })
           }

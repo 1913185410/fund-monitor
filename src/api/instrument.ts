@@ -8,6 +8,18 @@ const qs = (params: Record<string, string | number | undefined>) =>
     .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
     .join('&')
 
+/** 行业板块条目（涨跌榜） */
+export interface SectorItem {
+  code: string
+  name: string
+  changePct: number
+  index: number
+  mainNet: number
+  leaderName: string
+  leaderCode: string
+  leaderChangePct: number
+}
+
 export const instrumentApi = {
   /** 统一搜索（股票/ETF/基金/指数）：云端回传原始字节，浏览器侧 GBK 解码后解析 */
   async search(keyword: string, limit = 10): Promise<SearchResult[]> {
@@ -37,5 +49,12 @@ export const instrumentApi = {
     return getJSON<FlowBundle>(
       `/flow?${qs({ symbol: params.symbol, kind: params.kind, code: params.code, days: params.days ?? 10 })}`,
     )
+  },
+  /** 行业板块涨跌榜（公共信息） */
+  async sectorsTop(direction: 'up' | 'down', limit = 10): Promise<SectorItem[]> {
+    const data = await getJSON<{ direction: string; list: SectorItem[] }>(
+      `/sectors/top?${qs({ direction, limit })}`,
+    )
+    return data?.list ?? []
   },
 }

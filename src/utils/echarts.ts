@@ -3,7 +3,7 @@
  * 使用方式与全量一致：`import * as echarts from '@/utils/echarts'`
  */
 import * as echarts from 'echarts/core'
-import { BarChart, LineChart, CandlestickChart, HeatmapChart } from 'echarts/charts'
+import { BarChart, LineChart, CandlestickChart, HeatmapChart, TreemapChart, PieChart } from 'echarts/charts'
 import {
   GridComponent,
   TooltipComponent,
@@ -19,6 +19,8 @@ echarts.use([
   LineChart,
   CandlestickChart,
   HeatmapChart,
+  TreemapChart,
+  PieChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,

@@ -15,6 +15,7 @@ declare module 'vue' {
     AButton: typeof import('@arco-design/web-vue')['Button']
     ACard: typeof import('@arco-design/web-vue')['Card']
     ACol: typeof import('@arco-design/web-vue')['Col']
+    ADrawer: typeof import('@arco-design/web-vue')['Drawer']
     AEmpty: typeof import('@arco-design/web-vue')['Empty']
     AForm: typeof import('@arco-design/web-vue')['Form']
     AFormItem: typeof import('@arco-design/web-vue')['FormItem']
@@ -43,6 +44,7 @@ declare module 'vue' {
     ATableColumn: typeof import('@arco-design/web-vue')['TableColumn']
     ATag: typeof import('@arco-design/web-vue')['Tag']
     LoginGate: typeof import('./src/components/LoginGate.vue')['default']
+    NotificationBell: typeof import('./src/components/NotificationBell.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
   }

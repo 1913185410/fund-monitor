@@ -7,11 +7,15 @@ import {
   IconNotification,
   IconSettings,
   IconTool,
+  IconSun,
+  IconMoon,
 } from '@arco-design/web-vue/es/icon'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { usePortfolioStore } from '@/stores/portfolio'
 import { useRulesStore } from '@/stores/rules'
 import { useSyncStore } from '@/stores/sync'
+import { useSettingsStore } from '@/stores/settings'
+import NotificationBell from '@/components/NotificationBell.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,6 +23,10 @@ const isMobile = useIsMobile()
 const store = usePortfolioStore()
 const rulesStore = useRulesStore()
 const sync = useSyncStore()
+const settings = useSettingsStore()
+
+const themeIcon = computed(() => (settings.theme === 'dark' ? IconSun : IconMoon))
+const themeLabel = computed(() => (settings.theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'))
 
 onMounted(() => {
   // 启动：先拉取云端状态（自选股/规则/设置），再进入行情 + 规则循环
@@ -63,6 +71,12 @@ function go(key: string) {
           <rect x="21" y="2" width="9" height="28" rx="2" fill="#73a6ff" />
         </svg>
         <span class="app-logo-text">投资监控</span>
+        <div class="logo-actions">
+          <button class="action-btn" :aria-label="themeLabel" @click="settings.toggleTheme()">
+            <component :is="themeIcon" :size="18" />
+          </button>
+          <NotificationBell />
+        </div>
       </div>
       <a-menu :selected-keys="[activeKey]" @menu-item-click="go">
         <a-menu-item v-for="item in navItems" :key="item.key">
@@ -88,6 +102,12 @@ function go(key: string) {
           <rect x="21" y="2" width="9" height="28" rx="2" fill="#73a6ff" />
         </svg>
         <span class="mobile-title">投资监控</span>
+      </div>
+      <div class="header-actions">
+        <button class="action-btn" :aria-label="themeLabel" @click="settings.toggleTheme()">
+          <component :is="themeIcon" :size="20" />
+        </button>
+        <NotificationBell />
       </div>
     </header>
 
@@ -127,8 +147,32 @@ function go(key: string) {
   font-weight: 600;
   color: var(--color-text-1);
 }
+.logo-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
 .app-content {
   padding: 20px;
+}
+
+/* 顶部操作按钮（主题切换 / 通知） */
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-1);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.action-btn:hover {
+  background: var(--color-fill-2);
 }
 
 /* ---- 移动端样式 ---- */
@@ -157,6 +201,12 @@ function go(key: string) {
   font-size: 16px;
   font-weight: 600;
   color: var(--color-text-1);
+}
+.header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 .mobile-body {
   flex: 1;

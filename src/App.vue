@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, watch } from 'vue'
 import { RouterView } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useSettingsStore } from '@/stores/settings'
 import LoginGate from '@/components/LoginGate.vue'
 import AnnouncementCenter from '@/components/AnnouncementCenter.vue'
 
 const auth = useAuthStore()
+const settings = useSettingsStore()
+// 首屏同步应用主题，避免暗色闪烁
+settings.initTheme()
+watch(() => settings.theme, () => settings.applyTheme())
 onMounted(() => auth.init())
 </script>
 

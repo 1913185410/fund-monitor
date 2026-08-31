@@ -1,0 +1,1 @@
+var e={stock:`股票`,etf:`ETF`,fund:`基金`,index:`指数`,bond:`债券`},t={stock:`#165dff`,etf:`#722ed1`,fund:`#ff7d00`,index:`#13c2c2`,bond:`#86909c`};function n(t){return e[t??``]??`其他`}function r(e){return t[e??``]??`#86909c`}export{n as i,e as n,r,t};

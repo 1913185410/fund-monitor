@@ -19,6 +19,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '标的库' },
       },
       {
+        path: 'reminders',
+        name: 'reminders',
+        component: () => import('@/views/reminders/index.vue'),
+        meta: { title: '买卖提醒' },
+      },
+      {
         path: 'instruments/:code',
         name: 'instrument-detail',
         component: () => import('@/views/instruments/detail.vue'),

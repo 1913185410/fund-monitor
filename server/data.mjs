@@ -127,7 +127,43 @@ export async function klineStock(symbol, klt = 'day', count = 120) {
     }
   }
   // 最后兜底：新浪日K（不复权），周/月由日线聚合
-  return klineSinaFallback(symbol, klt, count)
+  const sina = await klineSinaFallback(symbol, klt, count)
+  if (sina) return sina
+  // 东财股票K线兜底（腾讯/新浪在部分出口不可达时使用，周/月最稳）
+  return klineStockEm(symbol, klt, count)
+}
+
+/** 股票 secid：沪市 1，深市/京市 0 */
+function secidOf(symbol) {
+  const m = /^([a-z]{2})(\d{6})$/i.exec(symbol || '')
+  if (!m) return null
+  const market = m[1].toLowerCase()
+  return `${market === 'sh' ? '1' : '0'}.${m[2]}`
+}
+const KLT_EM = { day: '101', week: '102', month: '103' }
+/** 股票 K 线（东财 push2，与板块同源；worker 出口已验证可达） */
+async function klineStockEm(symbol, klt = 'day', count = 120) {
+  const secid = secidOf(symbol)
+  const kltCode = KLT_EM[klt] || '101'
+  if (!secid) return null
+  const url = `https://push2.eastmoney.com/api/qt/stock/kline/get?ut=fa5fd1943c7b386f172d6893dbfba10b&invt=2&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58&klt=${kltCode}&secid=${secid}&lmt=${count}&fqt=1&end=20500101`
+  const json = await fetchJson(url)
+  const klines = json?.data?.klines
+  if (!Array.isArray(klines) || !klines.length) return null
+  const points = klines
+    .map((s) => {
+      const r = String(s).split(',')
+      return {
+        date: r[0],
+        open: Number(r[1]),
+        close: Number(r[2]),
+        high: Number(r[3]),
+        low: Number(r[4]),
+        volume: Number(r[5]) || 0,
+      }
+    })
+    .filter((p) => p.date && p.close > 0)
+  return points.length ? points : null
 }
 
 /** 新浪日K兜底（scale=240 日线；datalen 上限约 800） */
@@ -177,20 +213,24 @@ export async function fundBasicInfo(code) {
     `https://fundmobapi.eastmoney.com/FundMNewApi/FundMNBasicInformation?FCODE=${code}&deviceid=test&plat=Iphone&product=EFund&version=6.2.7`,
   )
   const d = body?.Datas
-  if (d && d.FCODE) {
-    const nav = Number(d.DWJZ)
-    const growth = Number(d.RZDF)
-    return {
-      code: d.FCODE,
-      name: d.SHORTNAME ?? '',
-      kind: 'fund',
-      symbol: code,
-      type: mapFtype(d.FTYPE ?? ''),
-      nav: Number.isFinite(nav) ? nav : 0,
-      navDate: d.FSRQ ?? '',
-      dailyGrowth: Number.isFinite(growth) ? growth : 0,
+    if (d && d.FCODE) {
+      const nav = Number(d.DWJZ)
+      const growth = Number(d.RZDF)
+      const info = {
+        code: d.FCODE,
+        name: d.SHORTNAME ?? '',
+        kind: 'fund',
+        symbol: code,
+        type: mapFtype(d.FTYPE ?? ''),
+        nav: Number.isFinite(nav) ? nav : 0,
+        navDate: d.FSRQ ?? '',
+        dailyGrowth: Number.isFinite(growth) ? growth : 0,
+      }
+      // 盘中估值（仅交易时段有效）：失败/非交易时段不写入，不阻塞主流程
+      const est = await fundEstimate(code)
+      if (est) Object.assign(info, est)
+      return info
     }
-  }
   // 降级：pingzhongdata 的每日净值趋势
   const text = await fetchText(`https://fund.eastmoney.com/pingzhongdata/${code}.js`)
   if (text) {
@@ -220,6 +260,41 @@ export async function fundBasicInfo(code) {
   return null
 }
 
+/**
+ * 盘中估值（天天基金 fundgz 接口，仅交易时段有效）。
+ * 返回 { estimateNav, estimateGrowth, estimateTime }；失败/非交易时段返回 null，不阻塞主流程。
+ * 模块级缓存 30s，避免批量持仓时频繁打上游被限频。
+ */
+const estCache = new Map()
+async function fundEstimate(code) {
+  try {
+    const hit = estCache.get(code)
+    if (hit && Date.now() - hit.at < 30_000) return hit.val
+    let val = null
+    try {
+      const txt = await fetchText(`https://fundgz.1234567.com.cn/js/${code}.js`, {}, 8000)
+      const m = txt && txt.match(/\{[^}]*\}/)
+      if (m) {
+        const obj = JSON.parse(m[0])
+        const gsz = Number(obj.gsz)
+        if (Number.isFinite(gsz) && obj.gsz !== '') {
+          val = {
+            estimateNav: gsz,
+            estimateGrowth: Number.isFinite(Number(obj.gszzl)) ? Number(obj.gszzl) : 0,
+            estimateTime: String(obj.gztime || ''),
+          }
+        }
+      }
+    } catch {
+      /* 估值接口异常：留空即可 */
+    }
+    estCache.set(code, { at: Date.now(), val })
+    return val
+  } catch {
+    return null
+  }
+}
+
 /** 基金净值日序列（东财 lsjz，每页最多 20 条，并行分页；失败时降级用官网净值走势） */
 async function fundNavDaily(code, count = 120) {
   const pageSize = 20
@@ -239,6 +314,9 @@ async function fundNavDaily(code, count = 120) {
     for (const r of list) {
       const close = Number(r.DWJZ)
       if (!r.FSRQ || !(close > 0)) continue
+      // accum＝累计净值（LJJZ）。指标计算优先用它：单位净值在分红除权日会跳空下跌，
+      // 直接拿单位净值算 MACD/RS 会产生假死叉、假走弱信号。
+      const accum = Number(r.LJJZ)
       all.push({
         date: r.FSRQ,
         open: close,
@@ -246,6 +324,7 @@ async function fundNavDaily(code, count = 120) {
         high: close,
         low: close,
         volume: 0,
+        accum: accum > 0 ? accum : close,
       })
     }
   }
@@ -259,6 +338,20 @@ async function fundNavFromPingzhong(code) {
   if (!text) return []
   const m = text.match(/Data_netWorthTrend = (\[[\s\S]*?\]);/)
   if (!m) return []
+  // 累计净值走势（Data_ACWorthTrend），用于指标计算，避免分红跳空
+  const accMap = new Map()
+  const am = text.match(/Data_ACWorthTrend = (\[[\s\S]*?\]);/)
+  if (am) {
+    try {
+      for (const r of JSON.parse(am[1])) {
+        if (r && typeof r.y === 'number') {
+          accMap.set(new Date(r.x + 8 * 3600 * 1000).toISOString().slice(0, 10), r.y)
+        }
+      }
+    } catch {
+      /* 累计净值解析失败则退回单位净值 */
+    }
+  }
   try {
     const list = JSON.parse(m[1])
     return list
@@ -266,7 +359,7 @@ async function fundNavFromPingzhong(code) {
       .map((r) => {
         const date = new Date(r.x + 8 * 3600 * 1000).toISOString().slice(0, 10)
         const close = r.y
-        return { date, open: close, close, high: close, low: close, volume: 0 }
+        return { date, open: close, close, high: close, low: close, volume: 0, accum: accMap.get(date) ?? close }
       })
       .sort((a, b) => (a.date < b.date ? -1 : 1))
   } catch {

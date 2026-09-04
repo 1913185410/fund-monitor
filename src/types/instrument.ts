@@ -27,6 +27,8 @@ export interface Instrument {
   estimateNav?: number
   /** 估算涨跌幅（基金） */
   estimateGrowth?: number
+  /** 估值时间（基金盘中估值，如 2026-09-04 14:00） */
+  estimateTime?: string
   /** 持有金额 */
   holdingAmount?: number
   /** 持有份额 */
@@ -35,6 +37,10 @@ export interface Instrument {
   totalProfit?: number
   /** 累计收益率（%） */
   totalProfitRate?: number
+  /** 最近一次账本同步时间戳（存在即表示该标的已纳入买入记录账本） */
+  ledgerAt?: number
+  /** 账本中是否存在按买入日净值反推的份额（估算提示用） */
+  ledgerEstimated?: boolean
 }
 
 export interface SearchResult {
@@ -72,6 +78,8 @@ export interface KLinePoint {
   high: number
   low: number
   volume: number
+  /** 累计净值（仅场外基金）：指标计算优先用它，避免分红除权跳空导致信号失真 */
+  accum?: number
 }
 
 /** 指标（与 K 线点位一一对齐；不足周期处为 null） */
@@ -80,6 +88,10 @@ export interface Indicators {
   macd: { dif: Array<number | null>; dea: Array<number | null>; hist: Array<number | null> }
   rsi: Record<string, Array<number | null>>
   kdj: { k: Array<number | null>; d: Array<number | null>; j: Array<number | null> }
+  /** 净值偏离 MA20 幅度（%），仅场外基金返回 */
+  dev?: Array<number | null>
+  /** 相对沪深300 强弱（首日=100），仅场外基金返回 */
+  rs?: { rs: Array<number | null>; rsMa: Array<number | null> }
 }
 
 export interface KLineBundle {

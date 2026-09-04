@@ -25,6 +25,33 @@ const kline = ref<KLineBundle | null>(null)
 const flow = ref<FlowBundle | null>(null)
 const dayKline = ref<KLineBundle | null>(null)
 
+/* 主图指标切换 + 时间范围（选择记忆到 localStorage，刷新/重进保持） */
+type MainKey = 'accNav' | 'nav' | 'rs' | 'dev'
+const MAIN_OPTIONS = [
+  { value: 'accNav', label: '累计净值' },
+  { value: 'nav', label: '单位净值' },
+  { value: 'rs', label: '相对沪深300' },
+  { value: 'dev', label: '偏离均线' },
+] as const
+const RANGE_OPTIONS = [
+  { value: '3m', label: '3月', count: 90 },
+  { value: '6m', label: '6月', count: 180 },
+  { value: '1y', label: '1年', count: 250 },
+  { value: 'all', label: '全部', count: 600 },
+] as const
+const selectedMain = ref<MainKey>((localStorage.getItem('fm:main') as MainKey) || 'accNav')
+const selectedRange = ref<string>(localStorage.getItem('fm:range') || '3m')
+const rangeCount = computed(() => RANGE_OPTIONS.find((o) => o.value === selectedRange.value)?.count ?? 90)
+// 主图切换只重绘（数据已加载）；时间范围变化需重新拉取
+watch(selectedMain, (v) => {
+  localStorage.setItem('fm:main', v)
+  if (chart) render()
+})
+watch(selectedRange, (v) => {
+  localStorage.setItem('fm:range', v)
+  loadData()
+})
+
 const chartEl = ref<HTMLDivElement | null>(null)
 let chart: echarts.ECharts | null = null
 
@@ -34,7 +61,7 @@ async function loadData() {
   loading.value = true
   try {
     const [k, f, dk] = await Promise.all([
-      instrumentApi.kline({ symbol: it.symbol, kind: it.kind, code: it.code, klt: klt.value, count: 90 }),
+      instrumentApi.kline({ symbol: it.symbol, kind: it.kind, code: it.code, klt: klt.value, count: rangeCount.value }),
       instrumentApi.flow({ symbol: it.symbol, kind: it.kind, code: it.code, days: 20 }),
       instrumentApi.kline({ symbol: it.symbol, kind: it.kind, code: it.code, klt: 'day', count: 250 }),
     ])
@@ -60,11 +87,6 @@ function render() {
     return
   }
   const dates = k.points.map((p) => p.date)
-  const kdata = k.points.map((p) => [p.open, p.close, p.low, p.high])
-  const vols = k.points.map((p) => ({
-    value: p.volume,
-    itemStyle: { color: p.close >= p.open ? '#f53f3f' : '#00b42a' },
-  }))
   const { ma, macd } = k.indicators
   const dif = macd.dif.map((v) => (v == null ? '-' : Number(v.toFixed(4))))
   const dea = macd.dea.map((v) => (v == null ? '-' : Number(v.toFixed(4))))
@@ -84,69 +106,217 @@ function render() {
     }
   })
 
-  chart.setOption(
-    {
-      animation: false,
-      legend: {
-        data: ['MA5', 'MA10', 'MA20', 'MA60', 'MACD'],
-        top: 0,
-        textStyle: { fontSize: 11 },
-      },
-      tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-      axisPointer: { link: [{ xAxisIndex: 'all' }] },
-      grid: [
-        { left: 56, right: 16, top: 26, height: '46%' },
-        { left: 56, right: 16, top: '60%', height: '12%' },
-        { left: 56, right: 16, top: '74%', height: '12%' },
-        { left: 56, right: 16, top: '88%', height: '9%' },
-      ],
-      xAxis: [
-        { type: 'category', data: dates, gridIndex: 0, boundaryGap: true, axisLabel: { show: false } },
-        { type: 'category', data: dates, gridIndex: 1, boundaryGap: true, axisLabel: { show: false } },
-        { type: 'category', data: dates, gridIndex: 2, boundaryGap: true, axisLabel: { show: false } },
-        {
-          type: 'category',
-          data: isQuarterly ? flowDates : dates,
-          gridIndex: 3,
-          axisLabel: { fontSize: 10, interval: Math.max(0, Math.floor(flowDates.length / 6)) },
-        },
-      ],
-      yAxis: [
-        { scale: true, gridIndex: 0, splitLine: { lineStyle: { opacity: 0.3 } } },
-        { gridIndex: 1, axisLabel: { show: false }, splitLine: { show: false } },
-        { gridIndex: 2, axisLabel: { show: false }, splitLine: { show: false } },
-        { gridIndex: 3, axisLabel: { fontSize: 10 }, splitLine: { show: false } },
-      ],
-      dataZoom: [
-        { type: 'inside', xAxisIndex: [0, 1, 2, 3], start: isQuarterly ? 0 : 55, end: 100 },
-        { type: 'slider', xAxisIndex: [0, 1, 2, 3], bottom: 2, height: 14, start: isQuarterly ? 0 : 55, end: 100 },
-      ],
-      series: [
-        {
-          name: 'K线', type: 'candlestick', data: kdata, xAxisIndex: 0, yAxisIndex: 0,
-          itemStyle: { color: '#f53f3f', color0: '#00b42a', borderColor: '#f53f3f', borderColor0: '#00b42a' },
-        },
-        ...['5', '10', '20', '60'].map((n) => ({
+  /* 场外基金没有开高低价与成交量，因此：
+     ① 主图画「累计净值」曲线（含分红再投，才是真实收益口径），
+     ② 把无意义的「成交量」格换成「相对沪深300强弱」，
+     ③ 新增「净值偏离均线」格用于判断超涨超跌。 */
+  const rs = k.indicators.rs
+  const dev = k.indicators.dev
+  const showRS = isFund.value && !!rs
+  const showDev = isFund.value && Array.isArray(dev) && dev.length > 0
+  // 主图切换为 RS/偏离 时，不再重复渲染对应副图格（避免重叠）
+  const rsRendered = showRS && selectedMain.value !== 'rs'
+  const devRendered = showDev && selectedMain.value !== 'dev'
+  const num3 = (v: number | null) => (v == null ? '-' : Number(v.toFixed(3)))
+
+  const grids: any[] = []
+  const xAxes: any[] = []
+  const yAxes: any[] = []
+  const series: any[] = []
+  const legend = ['MA5', 'MA10', 'MA20', 'MA60', 'MACD']
+
+  const addGrid = (top: string | number, height: string, withLabel = false, catData?: string[]) => {
+    const i = grids.length
+    const data = catData ?? dates
+    grids.push({ left: 56, right: 16, top, height })
+    xAxes.push({
+      type: 'category',
+      data,
+      gridIndex: i,
+      boundaryGap: true,
+      axisLabel: withLabel
+        ? { fontSize: 10, interval: Math.max(0, Math.floor(data.length / 6)) }
+        : { show: false },
+    })
+    yAxes.push({
+      gridIndex: i,
+      scale: true,
+      axisLabel: withLabel ? { fontSize: 10 } : { show: false },
+      splitLine: { show: i === 0, lineStyle: { opacity: 0.3 } },
+    })
+    return i
+  }
+
+  /* 主图：按 selectedMain 切换（累计净值/单位净值/相对沪深300/偏离均线）；股票/ETF＝K 线 */
+  const gMain = addGrid(26, isFund.value ? '34%' : '46%')
+  if (!isFund.value) {
+    series.push({
+      name: 'K线',
+      type: 'candlestick',
+      data: k.points.map((p) => [p.open, p.close, p.low, p.high]),
+      xAxisIndex: gMain,
+      yAxisIndex: gMain,
+      itemStyle: { color: '#f53f3f', color0: '#00b42a', borderColor: '#f53f3f', borderColor0: '#00b42a' },
+    })
+  } else {
+    let mainName = '累计净值'
+    let mainData: (number | string)[] = k.points.map((p) => (p.accum && p.accum > 0 ? p.accum : p.close))
+    if (selectedMain.value === 'nav') {
+      mainName = '单位净值'
+      mainData = k.points.map((p) => p.close)
+    } else if (selectedMain.value === 'rs' && rs) {
+      mainName = '相对沪深300'
+      mainData = (rs.rs ?? []).map(num3)
+    } else if (selectedMain.value === 'dev' && dev) {
+      mainName = '偏离均线%'
+      mainData = (dev ?? []).map((v) => (v == null ? '-' : Number((v as number).toFixed(3))))
+    }
+    series.push({
+      name: mainName,
+      type: 'line',
+      data: mainData,
+      xAxisIndex: gMain,
+      yAxisIndex: gMain,
+      symbol: 'none',
+      lineStyle: { width: 2, color: '#165dff' },
+    })
+    // 仅净值类主图叠加均线；RS/偏离为比率指标，不叠 MA
+    if (selectedMain.value === 'accNav' || selectedMain.value === 'nav') {
+      for (const n of ['5', '10', '20', '60']) {
+        series.push({
           name: `MA${n}`,
           type: 'line',
           data: (ma[n] ?? []).map((v) => (v == null ? '-' : Number(v.toFixed(3)))),
-          xAxisIndex: 0,
-          yAxisIndex: 0,
+          xAxisIndex: gMain,
+          yAxisIndex: gMain,
           symbol: 'none',
           lineStyle: { width: 1 },
-        })),
-        { name: '成交量', type: 'bar', data: vols, xAxisIndex: 1, yAxisIndex: 1 },
-        { name: 'MACD', type: 'bar', data: hist, xAxisIndex: 2, yAxisIndex: 2 },
-        { name: 'DIF', type: 'line', data: dif, xAxisIndex: 2, yAxisIndex: 2, symbol: 'none', lineStyle: { width: 1, color: '#f53f3f' } },
-        { name: 'DEA', type: 'line', data: dea, xAxisIndex: 2, yAxisIndex: 2, symbol: 'none', lineStyle: { width: 1, color: '#00b42a' } },
-        {
-          name: isQuarterly ? '规模(亿)' : '主力净流入(亿)',
-          type: 'bar',
-          data: flowValues,
-          xAxisIndex: 3,
-          yAxisIndex: 3,
-        },
+        })
+      }
+    }
+  }
+
+  /* 第二格：股票＝成交量；场外基金＝相对沪深300强弱 */
+  if (rsRendered && rs) {
+    const gRS = addGrid('46%', '13%')
+    legend.push('RS强弱', 'RS均线')
+    series.push({
+      name: 'RS强弱',
+      type: 'line',
+      data: (rs.rs ?? []).map(num3),
+      xAxisIndex: gRS,
+      yAxisIndex: gRS,
+      symbol: 'none',
+      lineStyle: { width: 1.8, color: '#3b82f6' },
+      markLine: {
+        silent: true,
+        symbol: 'none',
+        data: [
+          {
+            yAxis: 100,
+            lineStyle: { color: '#c9d2de', type: 'dashed', width: 1 },
+            label: { formatter: '基准100', fontSize: 10, color: '#a3adbd' },
+          },
+        ],
+      },
+    })
+    series.push({
+      name: 'RS均线',
+      type: 'line',
+      data: (rs.rsMa ?? []).map(num3),
+      xAxisIndex: gRS,
+      yAxisIndex: gRS,
+      symbol: 'none',
+      lineStyle: { width: 1.6, color: '#f59e0b' },
+    })
+  } else {
+    const gVol = addGrid('60%', '12%')
+    series.push({
+      name: '成交量',
+      type: 'bar',
+      data: k.points.map((p) => ({
+        value: p.volume,
+        itemStyle: { color: p.close >= p.open ? '#f53f3f' : '#00b42a' },
+      })),
+      xAxisIndex: gVol,
+      yAxisIndex: gVol,
+    })
+  }
+
+  /* MACD */
+  const gMacd = addGrid(rsRendered ? '60%' : '74%', '12%')
+  series.push({ name: 'MACD', type: 'bar', data: hist, xAxisIndex: gMacd, yAxisIndex: gMacd })
+  series.push({
+    name: 'DIF',
+    type: 'line',
+    data: dif,
+    xAxisIndex: gMacd,
+    yAxisIndex: gMacd,
+    symbol: 'none',
+    lineStyle: { width: 1, color: '#f53f3f' },
+  })
+  series.push({
+    name: 'DEA',
+    type: 'line',
+    data: dea,
+    xAxisIndex: gMacd,
+    yAxisIndex: gMacd,
+    symbol: 'none',
+    lineStyle: { width: 1, color: '#00b42a' },
+  })
+
+  /* 第四格：场外基金＝净值偏离均线幅度（超涨/超跌） */
+  if (devRendered && dev) {
+    const gDev = addGrid(rsRendered ? '74%' : '86%', '10%')
+    legend.push('偏离均线%')
+    series.push({
+      name: '偏离均线%',
+      type: 'bar',
+      data: dev.map((v) => ({
+        value: v == null ? 0 : Number(v.toFixed(3)),
+        itemStyle: { color: (v ?? 0) >= 0 ? '#f53f3f' : '#00b42a' },
+      })),
+      xAxisIndex: gDev,
+      yAxisIndex: gDev,
+      markLine: {
+        silent: true,
+        symbol: 'none',
+        data: [
+          {
+            yAxis: 0,
+            lineStyle: { color: '#c9d2de', type: 'dashed', width: 1 },
+            label: { formatter: '0', fontSize: 10, color: '#a3adbd' },
+          },
+        ],
+      },
+    })
+  }
+
+  /* 底格：资金流 / 季度规模，带日期轴 */
+  const gFlow = addGrid(devRendered ? '86%' : '88%', '9%', true, isQuarterly ? flowDates : dates)
+  series.push({
+    name: isQuarterly ? '规模(亿)' : '主力净流入(亿)',
+    type: 'bar',
+    data: flowValues,
+    xAxisIndex: gFlow,
+    yAxisIndex: gFlow,
+  })
+
+  const zoomIdx = grids.map((_, i) => i)
+  chart.setOption(
+    {
+      animation: false,
+      legend: { data: legend, top: 0, textStyle: { fontSize: 11 } },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+      axisPointer: { link: [{ xAxisIndex: 'all' }] },
+      grid: grids,
+      xAxis: xAxes,
+      yAxis: yAxes,
+      dataZoom: [
+        { type: 'inside', xAxisIndex: zoomIdx, start: isQuarterly ? 0 : 55, end: 100 },
+        { type: 'slider', xAxisIndex: zoomIdx, bottom: 2, height: 14, start: isQuarterly ? 0 : 55, end: 100 },
       ],
+      series,
     },
     true,
   )
@@ -159,7 +329,12 @@ function onResize() {
 const trend = computed(() => {
   const pts = kline.value?.points ?? []
   if (pts.length < 2) return 0
-  return ((pts[pts.length - 1].close - pts[0].close) / pts[0].close) * 100
+  // 场外基金用累计净值：单位净值在分红除权日会跳空下跌，算出来的涨跌幅会被严重低估
+  const pick = (p: (typeof pts)[number]) => (isFund.value && p.accum && p.accum > 0 ? p.accum : p.close)
+  const a = pick(pts[0])
+  const b = pick(pts[pts.length - 1])
+  if (!(a > 0)) return 0
+  return ((b - a) / a) * 100
 })
 
 const latest = computed(() => {
@@ -202,7 +377,14 @@ function confirmAddHolding() {
   if (!fund.value) return
   holdings.addRecord(fund.value.code, holdForm.value.date, holdForm.value.amount, holdForm.value.share)
   addHoldingVisible.value = false
+  void store.syncLedgers()
   Message.success('已添加持有记录')
+}
+
+function onRemoveRecord(id: string) {
+  holdings.removeRecord(id)
+  void store.syncLedgers()
+  Message.success('已删除持有记录')
 }
 
 watch([fund, klt], () => loadData())
@@ -237,6 +419,15 @@ onBeforeUnmount(() => {
       <span :class="fund.dailyGrowth >= 0 ? 'grow' : 'shrink'">
         {{ fund.dailyGrowth >= 0 ? '+' : '' }}{{ fund.dailyGrowth.toFixed(2) }}%
       </span>
+      <template v-if="fund.kind === 'fund' && fund.estimateNav && fund.estimateNav > 0">
+        <span class="nv-sep">·</span>
+        <span class="nv-label">盘中估值</span>
+        <span class="nv-number est">{{ fund.estimateNav.toFixed(4) }}</span>
+        <span :class="fund.estimateGrowth >= 0 ? 'grow' : 'shrink'">
+          {{ fund.estimateGrowth >= 0 ? '+' : '' }}{{ fund.estimateGrowth.toFixed(2) }}%
+        </span>
+        <span v-if="fund.estimateTime" class="nv-date">{{ fund.estimateTime }}</span>
+      </template>
     </div>
 
     <div class="stat-row">
@@ -262,12 +453,24 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <div v-if="fund.ledgerAt && fund.ledgerEstimated" class="ledger-hint">
+      部分份额未填写，已按「买入金额 ÷ 当日净值」估算，持有金额与累计收益为估算口径。
+    </div>
+
     <div class="chart-toolbar">
-      <a-radio-group v-model="klt" type="button" size="small">
-        <a-radio value="day">日K</a-radio>
-        <a-radio value="week">周K</a-radio>
-        <a-radio value="month">月K</a-radio>
-      </a-radio-group>
+      <div class="toolbar-left">
+        <a-radio-group v-model="klt" type="button" size="small">
+          <a-radio value="day">日K</a-radio>
+          <a-radio value="week">周K</a-radio>
+          <a-radio value="month">月K</a-radio>
+        </a-radio-group>
+        <a-radio-group v-model="selectedMain" type="button" size="small" title="主图指标">
+          <a-radio v-for="o in MAIN_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</a-radio>
+        </a-radio-group>
+        <a-radio-group v-model="selectedRange" type="button" size="small" title="时间范围">
+          <a-radio v-for="o in RANGE_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</a-radio>
+        </a-radio-group>
+      </div>
       <div class="toolbar-right">
         <a-tag :color="trend >= 0 ? 'red' : 'green'">
           区间{{ trend >= 0 ? '+' : '' }}{{ trend.toFixed(2) }}%
@@ -276,7 +479,11 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div ref="chartEl" class="chart" :style="{ height: flow?.points?.length ? '560px' : '420px' }" />
+    <div
+      ref="chartEl"
+      class="chart"
+      :style="{ height: isFund ? '660px' : flow?.points?.length ? '560px' : '420px' }"
+    />
 
     <a-alert v-if="fund.kind === 'fund'" type="warning" class="flow-note">
       <template #title>说明：场外基金没有日内资金流向，下方显示的是季度规模变动（亿元）与环比，供参考。</template>
@@ -323,7 +530,7 @@ onBeforeUnmount(() => {
             <span class="hold-date">{{ item.date }}</span>
             <span class="hold-amt">{{ fmtMoney(item.amount) }} 元</span>
             <span class="hold-share">{{ fmtMoney(item.share) }} 份</span>
-            <a-button type="text" size="mini" status="danger" @click="holdings.removeRecord(item.id)">删除</a-button>
+            <a-button type="text" size="mini" status="danger" @click="onRemoveRecord(item.id)">删除</a-button>
           </a-list-item>
         </template>
       </a-list>
@@ -407,11 +614,29 @@ onBeforeUnmount(() => {
   color: var(--color-text-3);
   font-size: 13px;
 }
+.nv-sep {
+  color: var(--color-text-3);
+  margin: 0 2px;
+}
+.nv-number.est {
+  font-size: 20px;
+  color: var(--color-text-1);
+}
 .stat-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 16px;
-  margin-bottom: 20px;
+  margin-bottom: 8px;
+}
+.ledger-hint {
+  margin: 0 0 20px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgb(var(--orange-1));
+  border: 1px solid rgb(var(--orange-3));
+  color: rgb(var(--orange-6));
+  font-size: 12px;
+  line-height: 1.6;
 }
 .stat {
   padding: 14px 16px;
@@ -435,6 +660,12 @@ onBeforeUnmount(() => {
   margin-bottom: 8px;
   flex-wrap: wrap;
   gap: 8px;
+}
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .toolbar-right {
   display: flex;

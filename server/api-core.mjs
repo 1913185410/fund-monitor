@@ -11,7 +11,9 @@
 import { searchAll, quoteBatch, klineStock, klineFund, flowDaily, fundScale, fundBasicInfo, sectorsTop } from './data.mjs'
 import { computeIndicators } from './indicators.mjs'
 import { loadState, saveState } from './state-store.mjs'
-import { tc3Call } from './tc3.mjs'
+// 注意：tc3.mjs 依赖 node:crypto（腾讯云 API 签名），Workers 运行时不存在该模块，
+// 因此不能静态引入，否则打包进 Pages Functions 会导致整个 Worker 加载失败。
+// 它仅用于「修改访问口令时同步更新 SCF 环境变量」这一 Node/SCF 专属分支，按需动态加载即可。
 
 const COOKIE_NAME = 'fm_auth'
 const STATE_CACHE_KEY = 'state:profile'
@@ -130,8 +132,17 @@ export async function handleApiRequest(request, env = {}) {
     const data = await cached(key, 600_000, async () => {
       const points =
         kind === 'fund' ? await klineFund(code, klt, count) : await klineStock(symbol, klt, count)
-      if (!points || !points.length) return null
-      return { points, indicators: computeIndicators(points) }
+      if (!points || !points.length) return { points: [], indicators: computeIndicators([], null) }
+      // 场外基金：额外拉沪深300 作为基准，计算「相对强弱」曲线（按日期对齐到净值序列）
+      let baseCloses = null
+      if (kind === 'fund') {
+        const bp = await cached('idx:sh000300:day:500', 600_000, () => klineStock('sh000300', 'day', 500))
+        if (Array.isArray(bp) && bp.length) {
+          const m = new Map(bp.map((p) => [p.date, p.close]))
+          baseCloses = points.map((p) => m.get(p.date) ?? null)
+        }
+      }
+      return { points, indicators: computeIndicators(points, baseCloses) }
     })
     return data ? json(200, data) : json(404, { message: '未取到K线数据' })
   }
@@ -233,6 +244,8 @@ export async function handleApiRequest(request, env = {}) {
         { Key: 'COS_BUCKET', Value: process.env.COS_BUCKET || '' },
         { Key: 'COS_REGION', Value: process.env.COS_REGION || 'ap-guangzhou' },
       ].filter((v) => v.Value)
+      // 仅 Node/SCF 运行时才会走到这里（依赖 process.env 与 node:crypto）
+      const { tc3Call } = await import('./tc3.mjs')
       const r = await tc3Call({
         service: 'scf',
         host: 'scf.tencentcloudapi.com',

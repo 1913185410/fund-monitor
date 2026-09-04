@@ -5,7 +5,7 @@ import type { FundInfo, NavPoint } from '@/types/fund'
  * 基金行情数据接口层。
  * 后端代理（/server）统一对外暴露以下友好接口，数据来自天天基金/东方财富。
  */
-export type Quote = Pick<FundInfo, 'code' | 'name' | 'type' | 'nav' | 'navDate' | 'dailyGrowth'>
+export type Quote = Pick<FundInfo, 'code' | 'name' | 'type' | 'nav' | 'navDate' | 'dailyGrowth' | 'estimateNav' | 'estimateGrowth' | 'estimateTime'>
 
 export interface SearchResult {
   code: string

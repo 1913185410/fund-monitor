@@ -16,6 +16,8 @@ export interface FundInfo {
   estimateNav?: number
   /** 估算涨跌幅（%） */
   estimateGrowth?: number
+  /** 估值时间（基金盘中估值，如 2026-09-04 14:00） */
+  estimateTime?: string
   /** 持有金额 */
   holdingAmount?: number
   /** 持有份额 */

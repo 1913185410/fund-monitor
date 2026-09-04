@@ -47,6 +47,8 @@ declare module 'vue' {
     IconUpload: typeof import('@arco-design/web-vue/es/icon')['IconUpload']
     LoginGate: typeof import('./src/components/LoginGate.vue')['default']
     NotificationBell: typeof import('./src/components/NotificationBell.vue')['default']
+    ReminderComposer: typeof import('./src/components/ReminderComposer.vue')['default']
+    ReminderSheet: typeof import('./src/components/ReminderSheet.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
   }

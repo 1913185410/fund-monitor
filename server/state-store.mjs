@@ -12,16 +12,27 @@ export async function loadState(env) {
   if (env && env.FM_STATE) {
     return kvGet(env, KEY)
   }
-  const { cosGetJson } = await import('./cos-store.mjs')
-  return cosGetJson(KEY)
+  // COS 分支必须兜异常：凭证缺失 / 网络失败时若抛出未捕获 rejection，会让整个 Node 服务崩溃
+  try {
+    const { cosGetJson } = await import('./cos-store.mjs')
+    return await cosGetJson(KEY)
+  } catch (e) {
+    console.warn('[state] COS 读取失败，降级为无云端数据：', e?.message || e)
+    return null
+  }
 }
 
 export async function saveState(env, data) {
   if (env && env.FM_STATE) {
     return kvPut(env, KEY, data)
   }
-  const { cosPutJson } = await import('./cos-store.mjs')
-  return cosPutJson(KEY, data)
+  try {
+    const { cosPutJson } = await import('./cos-store.mjs')
+    return await cosPutJson(KEY, data)
+  } catch (e) {
+    console.warn('[state] COS 写入失败，本次同步未落云端：', e?.message || e)
+    return null
+  }
 }
 
 // 延迟引入 KV 适配，避免在未绑定时也加载无关模块
@@ -31,5 +42,5 @@ async function kvGet(env, key) {
 }
 async function kvPut(env, key, data) {
   const { kvPutJson } = await import('./kv-store.mjs')
-  return kvPutJson(env, KEY, data)
+  return kvPutJson(env, key, data)
 }

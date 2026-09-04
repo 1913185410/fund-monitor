@@ -23,6 +23,22 @@ function ma(list, n) {
   return out
 }
 
+/** 健壮版均线：跳过 null（用于 RS 这类可能存在缺口对齐的序列） */
+function maSkip(list, n) {
+  const out = new Array(list.length).fill(null)
+  const win = []
+  let sum = 0
+  for (let i = 0; i < list.length; i++) {
+    const v = list[i]
+    if (v == null) continue
+    win.push(v)
+    sum += v
+    if (win.length > n) sum -= win.shift()
+    if (win.length === n) out[i] = sum / n
+  }
+  return out
+}
+
 /** MACD(12,26,9)：DIF / DEA / 柱(2*(DIF-DEA)) */
 export function macd(closes, fast = 12, slow = 26, signal = 9) {
   const emaFast = ema(closes, fast)
@@ -82,21 +98,50 @@ export function kdj(highs, lows, closes, n = 9, kSmooth = 3, dSmooth = 3) {
   return { k, d, j }
 }
 
-/** 汇总计算全部指标，返回与 points 对齐的结构 */
-export function computeIndicators(points) {
-  const closes = points.map((p) => p.close)
-  const highs = points.map((p) => p.high)
-  const lows = points.map((p) => p.low)
+/**
+ * 相对强弱（RS）：基金净值 ÷ 基准收盘，首个有效值归一化为 100。
+ * 曲线上行＝跑赢基准，下行＝跑输基准；rsMa 为其 20 日均线（用于判断强弱趋势方向）。
+ * 注意：净值需用累计净值（accum），否则分红除权造成的净值跳空会污染比值。
+ */
+export function relativeStrength(navs, base, maN = 20) {
+  const n = Math.min(navs.length, base ? base.length : 0)
+  const rs = new Array(n).fill(null)
+  let first = null
+  for (let i = 0; i < n; i++) {
+    const b = base[i]
+    if (!(b > 0) || !(navs[i] > 0)) continue
+    const v = navs[i] / b
+    if (first == null) first = v
+    if (first > 0) rs[i] = (v / first) * 100
+  }
+  return { rs, rsMa: maSkip(rs, maN) }
+}
+
+/** 偏离均线幅度（%）：(close − MA20) / MA20 × 100。正值＝强势区，负值＝弱势区 */
+export function deviation(closes, n = 20) {
+  const m = maSkip(closes, n)
+  return closes.map((c, i) => (m[i] != null && m[i] !== 0 ? ((c - m[i]) / m[i]) * 100 : null))
+}
+
+/**
+ * 汇总计算全部指标，返回与 points 对齐的结构。
+ * @param points K 线点位；若带 accum（累计净值，场外基金）则优先用它，避免分红跳空导致指标失真
+ * @param baseCloses 基准收盘序列（如沪深300），与 points 按日期对齐；传了才计算相对强弱
+ */
+export function computeIndicators(points, baseCloses = null) {
+  const useAccum = points.some((p) => p.accum > 0)
+  const pick = (p, key) => (useAccum && p.accum > 0 ? p.accum : p[key])
+  const closes = points.map((p) => pick(p, 'close'))
+  const highs = points.map((p) => pick(p, 'high'))
+  const lows = points.map((p) => pick(p, 'low'))
   const { dif, dea, hist } = macd(closes)
-  return {
-    ma: {
-      5: ma(closes, 5),
-      10: ma(closes, 10),
-      20: ma(closes, 20),
-      60: ma(closes, 60),
-    },
+  const out = {
+    ma: { 5: maSkip(closes, 5), 10: maSkip(closes, 10), 20: maSkip(closes, 20), 60: maSkip(closes, 60) },
     macd: { dif, dea, hist },
     rsi: { 14: rsi(closes, 14) },
     kdj: kdj(highs, lows, closes),
+    dev: deviation(closes, 20),
   }
+  if (baseCloses && baseCloses.length) out.rs = relativeStrength(closes, baseCloses, 20)
+  return out
 }

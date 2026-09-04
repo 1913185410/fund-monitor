@@ -2,18 +2,22 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import * as echarts from '@/utils/echarts'
 import { usePortfolioStore } from '@/stores/portfolio'
-import { useRulesStore } from '@/stores/rules'
+import { useReminderStore } from '@/stores/reminders'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
+import { useHoldingsStore } from '@/stores/holdings'
 import { kindLabel } from '@/types/instrument'
-import { SIGNAL_LABEL } from '@/types/rule'
 import { instrumentApi, type SectorItem } from '@/api/instrument'
 import { pearson } from '@/utils/analytics'
 
 const fundStore = usePortfolioStore()
-const rulesStore = useRulesStore()
+const reminders = useReminderStore()
 const settings = useSettingsStore()
 const auth = useAuthStore()
+const holdings = useHoldingsStore()
+
+/** 是否纳入「买入记录账本」：有账本才显示自动计算的浮动收益，无账本显示占位 */
+const hasLedger = (code: string) => holdings.recordsOf(code).length > 0
 
 // 红涨绿跌（A股习惯）
 const UP = '#f53f3f'
@@ -40,9 +44,6 @@ function fmtTime(t: number) {
 }
 function signalColor(s: string) {
   return s === 'buy' ? 'red' : s === 'sell' ? 'green' : 'arcoblue'
-}
-function signalLabel(s: string) {
-  return SIGNAL_LABEL[(s as 'buy' | 'sell' | 'hold')] ?? s
 }
 /** 元 → 万/亿 紧凑展示（对 undefined/NaN 兜底，避免 toFixed 抛错） */
 function fmtMoney(v: number): string {
@@ -524,6 +525,18 @@ watch(
               <template #cell="{ record }">{{ kindLabel(record.kind) || record.type || '—' }}</template>
             </a-table-column>
             <a-table-column title="最新净值" data-index="nav" :width="100" />
+            <a-table-column title="盘中估值" :width="130">
+              <template #cell="{ record }">
+                <template v-if="record.kind === 'fund' && record.estimateNav && record.estimateNav > 0">
+                  <div class="est-nav">{{ record.estimateNav.toFixed(4) }}</div>
+                  <span :class="record.estimateGrowth >= 0 ? 'grow' : 'shrink'" class="est-pct">
+                    {{ record.estimateGrowth >= 0 ? '+' : '' }}{{ record.estimateGrowth.toFixed(2) }}%
+                  </span>
+                  <div v-if="record.estimateTime" class="est-time">{{ record.estimateTime.slice(11) }}</div>
+                </template>
+                <span v-else class="no-ledger">—</span>
+              </template>
+            </a-table-column>
             <a-table-column title="日涨跌幅" :width="110">
               <template #cell="{ record }">
                 <span :class="record.dailyGrowth >= 0 ? 'grow' : 'shrink'">
@@ -538,9 +551,13 @@ watch(
             </a-table-column>
             <a-table-column title="累计收益(元)" :width="140">
               <template #cell="{ record }">
-                <span :class="(record.totalProfit ?? 0) >= 0 ? 'grow' : 'shrink'">
+                <span
+                  v-if="hasLedger(record.code) && record.totalProfit != null"
+                  :class="(record.totalProfit ?? 0) >= 0 ? 'grow' : 'shrink'"
+                >
                   {{ (record.totalProfit ?? 0) >= 0 ? '+' : '' }}{{ (record.totalProfit ?? 0).toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
                 </span>
+                <span v-else class="no-ledger">—</span>
               </template>
             </a-table-column>
           </template>
@@ -557,13 +574,17 @@ watch(
 
       <!-- 最新信号 -->
       <a-card title="最新信号" :bordered="false" class="dash-card">
-        <a-empty v-if="!rulesStore.signals.length" description="暂无信号。去「规则」页创建并启用规则，系统会每 60 秒自动评估。" />
-        <a-list v-else :data="rulesStore.latestSignals" :bordered="false">
+        <template #extra><a-tag color="arcoblue">形态模板 · 自定义条件</a-tag></template>
+        <a-empty v-if="!reminders.signals.length" description="暂无提醒。在「提醒」页启用形态模板或创建自定义条件规则，系统每 60 秒自动评估。" />
+        <a-list v-else :data="reminders.latestSignals" :bordered="false">
           <template #item="{ item }">
             <a-list-item class="signal-item">
-              <a-tag :color="signalColor(item.signal)">{{ signalLabel(item.signal) }}</a-tag>
+              <a-tag :color="signalColor(item.side)">{{ item.sideLabel }}</a-tag>
               <span class="sig-name">{{ item.name }}</span>
-              <span class="sig-rule">{{ item.ruleName }}</span>
+              <a-tag size="small" :color="item.source === 'template' ? 'arcoblue' : 'purple'">
+                {{ item.source === 'template' ? '模板' : '自定义' }}
+              </a-tag>
+              <span class="sig-rule">{{ item.typeName }}</span>
               <span class="sig-conf">置信度 {{ item.confidence }}%</span>
               <span class="sig-time">{{ fmtTime(item.time) }}</span>
             </a-list-item>
@@ -598,6 +619,21 @@ watch(
   margin-left: 4px;
   color: var(--color-text-3);
   font-size: 12px;
+}
+.no-ledger {
+  color: var(--color-text-4);
+}
+.est-nav {
+  font-weight: 600;
+  color: var(--color-text-1);
+}
+.est-pct {
+  margin-left: 4px;
+  font-size: 12px;
+}
+.est-time {
+  color: var(--color-text-3);
+  font-size: 11px;
 }
 /* 两列紧凑网格 */
 .dash-grid {

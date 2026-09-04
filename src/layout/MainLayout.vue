@@ -9,19 +9,21 @@ import {
   IconTool,
   IconSun,
   IconMoon,
+  IconExclamationCircle,
 } from '@arco-design/web-vue/es/icon'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { usePortfolioStore } from '@/stores/portfolio'
-import { useRulesStore } from '@/stores/rules'
+import { useReminderStore } from '@/stores/reminders'
 import { useSyncStore } from '@/stores/sync'
 import { useSettingsStore } from '@/stores/settings'
 import NotificationBell from '@/components/NotificationBell.vue'
+import ReminderSheet from '@/components/ReminderSheet.vue'
 
 const route = useRoute()
 const router = useRouter()
 const isMobile = useIsMobile()
 const store = usePortfolioStore()
-const rulesStore = useRulesStore()
+const reminders = useReminderStore()
 const sync = useSyncStore()
 const settings = useSettingsStore()
 
@@ -29,24 +31,33 @@ const themeIcon = computed(() => (settings.theme === 'dark' ? IconSun : IconMoon
 const themeLabel = computed(() => (settings.theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'))
 
 onMounted(() => {
-  // 启动：先拉取云端状态（自选股/规则/设置），再进入行情 + 规则循环
+  // 启动：先拉取云端状态（自选股/规则/设置），再进入行情 + 提醒（模板+规则统一评估）循环
   void sync.init()
   void sync.pull()
   const cycle = async () => {
-    await Promise.allSettled([store.refresh(), rulesStore.evaluateAll()])
+    await Promise.allSettled([store.refresh(), reminders.evaluateAll()])
   }
   cycle()
   const timer = window.setInterval(cycle, 60_000)
   onUnmounted(() => window.clearInterval(timer))
 })
 
-/** 顶层导航，同时用于侧边栏菜单与底部 Tab */
+/** 桌面侧边栏导航（含提醒） */
 const navItems = [
   { key: 'dashboard', label: '总览', icon: IconDashboard },
+  { key: 'reminders', label: '提醒', icon: IconExclamationCircle },
   { key: 'instruments', label: '标的库', icon: IconStorage },
   { key: 'rules', label: '规则', icon: IconNotification },
   { key: 'tools', label: '回测', icon: IconTool },
   { key: 'settings', label: '设置', icon: IconSettings },
+]
+
+/** 移动端底部 Tab（精简为 4 个，提醒优先） */
+const mobileNavItems = [
+  { key: 'dashboard', label: '总览', icon: IconDashboard },
+  { key: 'reminders', label: '提醒', icon: IconExclamationCircle },
+  { key: 'instruments', label: '标的', icon: IconStorage },
+  { key: 'settings', label: '我的', icon: IconSettings },
 ]
 
 const activeKey = computed(() => {
@@ -82,6 +93,7 @@ function go(key: string) {
         <a-menu-item v-for="item in navItems" :key="item.key">
           <template #icon><component :is="item.icon" /></template>
           {{ item.label }}
+          <span v-if="item.key === 'reminders' && reminders.unreadCount" class="nav-badge" />
         </a-menu-item>
       </a-menu>
     </a-layout-sider>
@@ -117,7 +129,7 @@ function go(key: string) {
 
     <nav class="mobile-tab-bar">
       <button
-        v-for="item in navItems"
+        v-for="item in mobileNavItems"
         :key="item.key"
         class="mobile-tab"
         :class="{ active: activeKey === item.key }"
@@ -125,9 +137,12 @@ function go(key: string) {
       >
         <component :is="item.icon" :size="22" class="mobile-tab-icon" />
         <span class="mobile-tab-label">{{ item.label }}</span>
+        <span v-if="item.key === 'reminders' && reminders.unreadCount" class="tab-badge" />
       </button>
     </nav>
   </div>
+
+  <ReminderSheet />
 </template>
 
 <style scoped>
@@ -244,5 +259,23 @@ function go(key: string) {
 }
 .mobile-tab-label {
   font-size: 11px;
+}
+.tab-badge {
+  position: absolute;
+  top: 5px;
+  right: calc(50% - 20px);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f53f3f;
+}
+.nav-badge {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f53f3f;
+  margin-left: 6px;
+  vertical-align: middle;
 }
 </style>

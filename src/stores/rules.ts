@@ -2,23 +2,14 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { instrumentApi } from '@/api/instrument'
 import { usePortfolioStore } from '@/stores/portfolio'
-import { useSettingsStore } from '@/stores/settings'
-import { computeMetrics, evaluateRule, type Metrics, type RuleResult } from '@/engine/evaluate'
-import { FIELD_META, SIGNAL_LABEL, type Rule, type Signal, type FieldKey } from '@/types/rule'
-import { showNotification } from '@/utils/notify'
-import { useAnnounceStore } from '@/stores/announce'
+import { computeMetrics, evaluateRule } from '@/engine/evaluate'
+import { FIELD_META, type Rule, type Signal, type FieldKey } from '@/types/rule'
 import type { Instrument, InstrumentKind } from '@/types/instrument'
 
 const RULES_KEY = 'fm:rules'
 const SIGNALS_KEY = 'fm:signals'
 /** 同规则同标的同方向去重窗口（6 小时） */
 const DEDUP_MS = 6 * 3600 * 1000
-
-interface GroupResult {
-  it: Instrument
-  metrics: Metrics
-  hits: Array<{ r: Rule; m: RuleResult }>
-}
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -35,6 +26,20 @@ function load<T>(key: string, fallback: T): T {
 
 let seed = 0
 export const nextId = (p: string) => `${p}${Date.now().toString(36)}${(seed++).toString(36)}`
+
+/** 规则命中历史输入（由提醒中心统一评估后回填） */
+export interface RuleSignalHit {
+  ruleId: string
+  ruleName: string
+  code: string
+  name: string
+  kind: InstrumentKind
+  signal: 'buy' | 'sell' | 'hold'
+  confidence: number
+  time: number
+  detail: string
+  metrics: Signal['metrics']
+}
 
 export const useRulesStore = defineStore('rules', () => {
   const rules = ref<Rule[]>(load<Rule[]>(RULES_KEY, []))
@@ -90,105 +95,20 @@ export const useRulesStore = defineStore('rules', () => {
   const enabledCount = computed(() => rules.value.filter((r) => r.enabled).length)
   const latestSignals = computed(() => signals.value.slice(0, 5))
 
-  /** 评估所有启用规则；返回本次新增信号数 */
-  async function evaluateAll(): Promise<number> {
-    const enabled = rules.value.filter((r) => r.enabled)
-    if (!enabled.length || evaluating.value) return 0
-    const portfolio = usePortfolioStore()
-    evaluating.value = true
-    error.value = null
-    let added = 0
-    try {
-      const byCode = new Map<string, Rule[]>()
-      for (const r of enabled) {
-        const arr = byCode.get(r.code)
-        if (arr) arr.push(r)
-        else byCode.set(r.code, [r])
-      }
-      const groups = (
-        await Promise.all(
-          [...byCode.entries()].map(async ([code, rs]): Promise<GroupResult | null> => {
-            try {
-              const it = portfolio.funds.find((f) => f.code === code)
-              if (!it) return null
-              const [k, f] = await Promise.all([
-                instrumentApi.kline({
-                  symbol: it.symbol,
-                  kind: it.kind as InstrumentKind,
-                  code: it.code,
-                  klt: 'day',
-                  count: 120,
-                }),
-                it.kind === 'fund' || it.kind === 'index'
-                  ? Promise.resolve(null)
-                  : instrumentApi.flow({ symbol: it.symbol, kind: it.kind as InstrumentKind, days: 10 }),
-              ])
-              if (!k || !k.points.length) return null
-              const metrics = computeMetrics(k, f)
-              const hits: GroupResult['hits'] = []
-              for (const r of rs) {
-                const m = evaluateRule(r, metrics)
-                if (m.matched) hits.push({ r, m })
-              }
-              return { it, metrics, hits }
-            } catch {
-              // 单个标的数据拉取失败不影响其它标的评估
-              return null
-            }
-          }),
-        )
-      ).filter((x): x is GroupResult => x !== null)
-      const now = Date.now()
-      for (const g of groups) {
-        for (const { r, m } of g.hits) {
-          const dup = signals.value.some(
-            (s) => s.ruleId === r.id && s.code === r.code && s.signal === r.signal && now - s.time < DEDUP_MS,
-          )
-          if (dup) continue
-          signals.value.unshift({
-            id: nextId('s'),
-            ruleId: r.id,
-            ruleName: r.name,
-            code: r.code,
-            name: g.it.name,
-            kind: g.it.kind as InstrumentKind,
-            signal: r.signal,
-            confidence: m.confidence,
-            time: now,
-            detail: m.detail.join(' · '),
-            metrics: g.metrics,
-          })
-          added++
-          if (signals.value.length > 200) signals.value.pop()
-        }
-      }
-      persistSignals()
-      lastEvalAt.value = now
-
-      /* 提醒：新增信号弹应用内公告（可点击关闭），浏览器通知作为可选附加通道 */
-      if (added > 0) {
-        const announce = useAnnounceStore()
-        const st = useSettingsStore()
-        for (const s of signals.value.slice(0, added)) {
-          const label = SIGNAL_LABEL[s.signal] ?? s.signal
-          announce.push({
-            kind: 'signal',
-            title: `${s.name} · ${label}`,
-            body: `${s.ruleName} · 置信度 ${s.confidence}%`,
-          })
-          if (st.notify) {
-            showNotification(`${s.name} · ${label}`, {
-              body: `${s.ruleName} · 置信度 ${s.confidence}%`,
-            })
-          }
-        }
-      }
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : '规则评估失败'
-    } finally {
-      evaluating.value = false
+  /** 由提醒中心评估后回填信号历史（沿用 6h 去重 + 200 条上限） */
+  function appendSignals(hits: RuleSignalHit[]) {
+    if (!hits.length) return
+    const now = hits[0]?.time ?? Date.now()
+    for (const h of hits) {
+      const dup = signals.value.some(
+        (s) => s.ruleId === h.ruleId && s.code === h.code && s.signal === h.signal && now - s.time < DEDUP_MS,
+      )
+      if (dup) continue
+      signals.value.unshift({ id: nextId('s'), ...h })
+      if (signals.value.length > 200) signals.value.pop()
     }
-    return added
+    persistSignals()
+    lastEvalAt.value = now
   }
 
   /** 立即测试单条规则（不写入信号） */
@@ -228,7 +148,7 @@ export const useRulesStore = defineStore('rules', () => {
     removeRule,
     clearSignals,
     replaceAll,
-    evaluateAll,
+    appendSignals,
     testRule,
     fieldsFor,
   }

@@ -5,11 +5,13 @@ import '@arco-design/web-vue/es/message/style/css.js'
 import '@arco-design/web-vue/es/modal/style/css.js'
 import { usePortfolioStore } from '@/stores/portfolio'
 import { useRulesStore } from '@/stores/rules'
+import { useReminderStore } from '@/stores/reminders'
 import { FIELD_META, OP_LABEL, SIGNAL_LABEL, type Rule, type RuleCondition, type RuleOp } from '@/types/rule'
 import { kindLabel, kindColor, type InstrumentKind } from '@/types/instrument'
 
 const portfolio = usePortfolioStore()
 const rulesStore = useRulesStore()
+const reminders = useReminderStore()
 
 const editorVisible = ref(false)
 const editing = ref<Rule | null>(null)
@@ -125,7 +127,7 @@ function save() {
     Message.success('规则已创建')
   }
   editorVisible.value = false
-  rulesStore.evaluateAll()
+  reminders.evaluateAll()
 }
 
 async function testRule(r: Rule) {
@@ -140,7 +142,7 @@ async function testRule(r: Rule) {
 }
 
 async function runAll() {
-  const n = await rulesStore.evaluateAll()
+  const n = await reminders.evaluateAll()
   Message.success(n > 0 ? `评估完成，新增 ${n} 条信号` : '评估完成，无新增信号')
 }
 
@@ -162,12 +164,12 @@ function ruleLastHit(r: Rule): number | null {
 }
 
 const lastEvalText = computed(() =>
-  rulesStore.lastEvalAt ? fmtTime(rulesStore.lastEvalAt) : '—',
+  reminders.lastEvalAt ? fmtTime(reminders.lastEvalAt) : '—',
 )
 
 onMounted(() => {
   if (portfolio.funds.length) portfolio.refresh()
-  rulesStore.evaluateAll()
+  reminders.evaluateAll()
 })
 </script>
 
@@ -176,10 +178,11 @@ onMounted(() => {
     <a-card :bordered="false">
       <div class="toolbar">
         <a-button type="primary" @click="openCreate">新建规则</a-button>
-        <a-button :loading="rulesStore.evaluating" @click="runAll">立即评估</a-button>
+        <a-button :loading="reminders.evaluating" @click="runAll">立即评估</a-button>
         <span class="toolbar-info">
           已启用 {{ rulesStore.enabledCount }} 条 · 最近评估 {{ lastEvalText }}
         </span>
+        <a class="to-reminders" href="#/reminders">信号统一在「提醒」页查看 →</a>
       </div>
 
       <a-table :data="rulesStore.rules" row-key="id" :pagination="false">
@@ -340,6 +343,12 @@ onMounted(() => {
 .toolbar-info {
   color: var(--color-text-3);
   font-size: 13px;
+}
+.to-reminders {
+  margin-left: auto;
+  color: rgb(var(--primary-6));
+  font-size: 13px;
+  text-decoration: none;
 }
 .remark {
   color: var(--color-text-3);
